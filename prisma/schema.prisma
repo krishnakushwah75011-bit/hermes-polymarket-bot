@@ -1,0 +1,265 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Leaderboard Scan - tracks each scan of the leaderboard
+model LeaderboardScan {
+  id              String   @id @default(cuid())
+  source          String   // "polymarket" | "bullpen"
+  scannedAt       DateTime @default(now())
+  walletCount     Int
+  lookbackDays    Int      @default(30)
+  rawSummaryJson  String
+}
+
+// Wallet Profile - scored wallets from leaderboard scans
+model WalletProfile {
+  id                    String    @id @default(cuid())
+  address               String    @unique
+  label                 String?
+  sourceRank            Int?
+  status                String    @default("IGNORE") // "TRACK" | "WATCH" | "IGNORE"
+  roi30d                Float     @default(0)
+  consistencyScore      Float     @default(0)
+  copyabilityScore      Float     @default(0)
+  oneHitWonderPenalty   Float     @default(0)
+  globalScore           Float     @default(0)
+  bestCategory          String?
+  categoryStrengthsJson String
+  averageTradeSize      Float     @default(0)
+  tradeCount30d         Int       @default(0)
+  resolvedTradeCount30d Int       @default(0)
+  winRate30d            Float     @default(0)
+  averageLiquidity      Float     @default(0)
+  averageSpread         Float     @default(0)
+  averageEntryTiming    Float     @default(0) // hours before resolution
+  copyabilityNotes      String?
+  riskNotes             String?
+  lastScannedAt         DateTime  @default(now())
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  observedTrades    ObservedTrade[]
+  decisions         DecisionJournal[]
+  paperTrades       PaperTrade[]
+  outcomeReviews    OutcomeReview[]
+
+  @@index([status])
+  @@index([globalScore])
+  @@index([bestCategory])
+}
+
+// Observed Trade - trades detected from tracked wallets
+model ObservedTrade {
+  id              String   @id @default(cuid())
+  walletAddress   String
+  marketId        String
+  conditionId     String
+  marketQuestion  String
+  marketCategory  String?
+  outcome         String   // "Yes" | "No" | outcome name
+  side            String   // "BUY" | "SELL"
+  walletEntryPrice Float
+  detectedPrice   Float
+  size            Float    // shares
+  timestamp       DateTime
+  rawTradeJson    String
+  createdAt       DateTime @default(now())
+
+  walletProfile   WalletProfile @relation(fields: [walletAddress], references: [address])
+  decisions       DecisionJournal[]
+
+  @@index([walletAddress])
+  @@index([marketId])
+  @@index([timestamp])
+  @@index([conditionId])
+}
+
+// Market Snapshot - hourly market data for PnL tracking
+model MarketSnapshot {
+  id               String   @id @default(cuid())
+  marketId         String
+  conditionId      String
+  question         String
+  category         String?
+  yesPrice         Float?
+  noPrice          Float?
+  bestBid          Float?
+  bestAsk          Float?
+  spread           Float?
+  liquidity        Float?
+  volume           Float?
+  timeToResolution Float?   // hours
+  collectedAt      DateTime @default(now())
+  rawMarketJson    String
+
+  @@index([marketId])
+  @@index([conditionId])
+  @@index([collectedAt])
+}
+
+// Decision Journal - every copy decision made
+model DecisionJournal {
+  id                  String       @id @default(cuid())
+  observedTradeId     String       @unique
+  walletAddress       String
+  marketId            String
+  decision            String       // "PAPER_COPY" | "WATCHLIST" | "SKIP"
+  copyScore           Float
+  confidence          Float
+  reasonsJson         String
+  risksJson           String
+  walletQualityScore  Float
+  roiScore            Float
+  consistencyScore    Float
+  copyabilityScore    Float
+  categoryFitScore    Float
+  entryTimingScore    Float
+  spreadScore         Float
+  liquidityScore      Float
+  thesisScore         Float
+  simulatedPositionSize Float      // $5-$20
+  createdAt           DateTime     @default(now())
+
+  observedTrade   ObservedTrade    @relation(fields: [observedTradeId], references: [id])
+  walletProfile   WalletProfile    @relation(fields: [walletAddress], references: [address])
+  paperTrade      PaperTrade?
+  outcomeReview   OutcomeReview?
+
+  @@index([walletAddress])
+  @@index([marketId])
+  @@index([decision])
+  @@index([createdAt])
+}
+
+// Paper Trade - simulated positions
+model PaperTrade {
+  id                      String        @id @default(cuid())
+  decisionJournalId       String        @unique
+  walletAddress           String
+  marketId                String
+  outcome                 String
+  side                    String        // "BUY" | "SELL"
+  entryPrice              Float
+  currentPrice            Float
+  simulatedPositionSize   Float         // $5-$20
+  unrealizedPnl           Float         @default(0)
+  realizedPnl             Float         @default(0)
+  status                  String        @default("OPEN") // "OPEN" | "CLOSED" | "RESOLVED"
+  openedAt                DateTime      @default(now())
+  closedAt                DateTime?
+  resolvedAt              DateTime?
+
+  decisionJournal DecisionJournal @relation(fields: [decisionJournalId], references: [id])
+  walletProfile   WalletProfile   @relation(fields: [walletAddress], references: [address])
+  pnlSnapshots    PnlSnapshot[]
+  outcomeReview   OutcomeReview?
+
+  @@index([walletAddress])
+  @@index([marketId])
+  @@index([status])
+  @@index([openedAt])
+}
+
+// PnL Snapshot - hourly PnL tracking
+model PnlSnapshot {
+  id            String   @id @default(cuid())
+  paperTradeId  String
+  price         Float
+  pnl           Float
+  collectedAt   DateTime @default(now())
+
+  paperTrade    PaperTrade @relation(fields: [paperTradeId], references: [id])
+
+  @@index([paperTradeId])
+  @@index([collectedAt])
+}
+
+// Outcome Review - post-resolution analysis
+model OutcomeReview {
+  id                  String   @id @default(cuid())
+  decisionJournalId   String   @unique
+  paperTradeId        String   @unique
+  walletAddress       String
+  marketId            String
+  reviewTime          DateTime @default(now())
+  priceAfter1h        Float?
+  priceAfter6h        Float?
+  priceAfter24h       Float?
+  finalOutcome        String?  // "Yes" | "No" | outcome name
+  simulatedPnl        Float
+  wasDecisionGood     Boolean
+  lessonsJson         String
+  createdAt           DateTime @default(now())
+
+  decisionJournal DecisionJournal @relation(fields: [decisionJournalId], references: [id])
+  paperTrade      PaperTrade      @relation(fields: [paperTradeId], references: [id])
+  walletProfile   WalletProfile   @relation(fields: [walletAddress], references: [address])
+
+  @@index([walletAddress])
+  @@index([marketId])
+  @@index([reviewTime])
+  @@index([wasDecisionGood])
+}
+
+// Rule Set - versioned scoring rules
+model RuleSet {
+  id          String   @id @default(cuid())
+  version     Int      @unique
+  active      Boolean  @default(false)
+  rulesJson   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  changes     RuleChange[] @relation("OldRuleSet")
+  newChanges  RuleChange[] @relation("NewRuleSet")
+
+  @@index([active])
+  @@index([version])
+}
+
+// Rule Change - history of rule modifications
+model RuleChange {
+  id                String   @id @default(cuid())
+  oldRuleSetId      String
+  newRuleSetId      String
+  changedBy         String   @default("hermes") // "hermes" | "manual"
+  reason            String
+  evidenceSummary   String
+  beforeJson        String
+  afterJson         String
+  createdAt         DateTime @default(now())
+
+  oldRuleSet RuleSet @relation("OldRuleSet", fields: [oldRuleSetId], references: [id])
+  newRuleSet RuleSet @relation("NewRuleSet", fields: [newRuleSetId], references: [id])
+
+  @@index([oldRuleSetId])
+  @@index([newRuleSetId])
+  @@index([createdAt])
+}
+
+// Daily Report - end-of-day summaries
+model DailyReport {
+  id                  String   @id @default(cuid())
+  date                DateTime @unique
+  paperPnl            Float    @default(0)
+  winRate             Float    @default(0)
+  openPositions       Int      @default(0)
+  newSignals          Int      @default(0)
+  copiedSignals       Int      @default(0)
+  watchedSignals      Int      @default(0)
+  skippedSignals      Int      @default(0)
+  bestWalletsJson     String
+  worstWalletsJson    String
+  ruleChangesJson     String
+  summary             String
+  sentToTelegram      Boolean  @default(false)
+  createdAt           DateTime @default(now())
+
+  @@index([date])
+}

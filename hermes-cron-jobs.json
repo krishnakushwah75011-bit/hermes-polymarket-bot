@@ -1,0 +1,68 @@
+{
+  "jobs": [
+    {
+      "name": "polymarket-scan-leaderboard",
+      "schedule": "0 */6 * * *",
+      "prompt": "Run the leaderboard scanner to fetch top 500 wallets from Polymarket",
+      "skills": ["polymarket"],
+      "script": "src/scripts/scan-leaderboard.ts",
+      "workdir": "C:/Users/krish/hermes-polymarket-bot"
+    },
+    {
+      "name": "polymarket-scan-wallets",
+      "schedule": "30 */6 * * *",
+      "prompt": "Scan wallet profiles - fetch 30-day trade history and score all tracked wallets",
+      "skills": ["polymarket"],
+      "script": "src/scripts/scan-wallets.ts",
+      "workdir": "C:/Users/krish/hermes-polymarket-bot"
+    },
+    {
+      "name": "polymarket-monitor-trades",
+      "schedule": "*/15 * * * *",
+      "prompt": "Monitor tracked wallets for new trades and score them",
+      "skills": ["polymarket"],
+      "script": "src/scripts/monitor-trades.ts",
+      "workdir": "C:/Users/krish/hermes-polymarket-bot"
+    },
+    {
+      "name": "polymarket-score-trades",
+      "schedule": "*/30 * * * *",
+      "prompt": "Score pending trades and make copy/watch/skip decisions",
+      "skills": ["polymarket"],
+      "script": "src/scripts/score-trades.ts",
+      "workdir": "C:/Users/krish/hermes-polymarket-bot"
+    },
+    {
+      "name": "polymarket-update-paper-pnl",
+      "schedule": "0 * * * *",
+      "prompt": "Update paper trade PnL with current market prices",
+      "skills": ["polymarket"],
+      "script": "src/scripts/update-paper-pnl.ts",
+      "workdir": "C:/Users/krish/hermes-polymarket-bot"
+    },
+    {
+      "name": "polymarket-review-outcomes",
+      "schedule": "0 2 * * *",
+      "prompt": "Review resolved paper trades and evaluate decision quality",
+      "skills": ["polymarket"],
+      "script": "src/scripts/review-outcomes.ts",
+      "workdir": "C:/Users/krish/hermes-polymarket-bot"
+    },
+    {
+      "name": "polymarket-update-rules",
+      "schedule": "0 2 * * 0",
+      "prompt": "Weekly rule adaptation based on paper trading performance",
+      "skills": ["polymarket"],
+      "script": "src/scripts/update-rules.ts",
+      "workdir": "C:/Users/krish/hermes-polymarket-bot"
+    },
+    {
+      "name": "polymarket-daily-report",
+      "schedule": "0 20 * * *",
+      "prompt": "Generate and send end-of-day report via Telegram",
+      "skills": ["polymarket"],
+      "script": "src/scripts/generate-daily-report.ts",
+      "workdir": "C:/Users/krish/hermes-polymarket-bot"
+    }
+  ]
+}
