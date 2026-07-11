@@ -1,11 +1,12 @@
 // src/scripts/monitor-trades.ts
 // Trade monitor - detects new trades from tracked wallets and scores them
 
-import { getAllWalletTrades, collectMarketSnapshot } from '@/lib/api/polymarket-client';
-import { scoreTrade, TradeScoringInput } from '@/lib/scoring/trade-scorer';
-import { getActiveRuleSet } from '@/lib/rules/rules-engine';
-import { createPaperTrade, calculateSimulatedPositionSize } from '@/lib/engine/paper-engine';
-import { prisma } from '@/lib/db/client';
+import { getAllWalletTrades, collectMarketSnapshot, getMarketBySlug, getMarketByConditionId } from '../lib/api/polymarket-client';
+import { scoreTrade, TradeScoringInput } from '../lib/scoring/trade-scorer';
+import { getActiveRuleSet } from '../lib/rules/rules-engine';
+import { createPaperTrade, calculateSimulatedPositionSize } from '../lib/engine/paper-engine';
+import { prisma } from '../lib/db/client';
+import type { MarketSnapshot, ParsedWalletTrade } from '../lib/types';
 
 async function monitorTrades() {
   console.log('[monitor:trades] Starting trade monitoring...');
@@ -15,7 +16,26 @@ async function monitorTrades() {
   // Get wallets with TRACK status
   const trackedWallets = await prisma.walletProfile.findMany({
     where: { status: 'TRACK' },
-    select: { address: true, globalScore: true, bestCategory: true },
+    select: { 
+      address: true, 
+      label: true,
+      globalScore: true, 
+      bestCategory: true,
+      categoryStrengthsJson: true,
+      averageEntryTiming: true,
+      roi30d: true,
+      consistencyScore: true,
+      copyabilityScore: true,
+      oneHitWonderPenalty: true,
+      averageTradeSize: true,
+      tradeCount30d: true,
+      resolvedTradeCount30d: true,
+      winRate30d: true,
+      averageLiquidity: true,
+      averageSpread: true,
+      sourceRank: true,
+      statusReason: true,
+    },
   });
   
   console.log(`[monitor:trades] Monitoring ${trackedWallets.length} tracked wallets`);
@@ -46,8 +66,27 @@ async function monitorTrades() {
         console.log(`[monitor:trades] New trade detected: ${wallet.address} -> ${trade.conditionId}`);
         newTradesDetected++;
         
-        // Collect market snapshot
-        const marketSnapshot = await collectMarketSnapshot(trade);
+        // Collect market snapshot - need to fetch market data first
+        const market = await getMarketBySlug(trade.marketId) || await getMarketByConditionId(trade.conditionId);
+        let marketSnapshot: MarketSnapshot | null = null;
+        if (market) {
+          marketSnapshot = await collectMarketSnapshot(market);
+        } else {
+          // Fallback: create minimal snapshot from trade data
+          marketSnapshot = {
+            marketId: trade.marketId,
+            conditionId: trade.conditionId,
+            question: trade.marketQuestion,
+            category: trade.marketCategory,
+            yesPrice: trade.outcome.toLowerCase() === 'yes' ? trade.price : undefined,
+            noPrice: trade.outcome.toLowerCase() === 'no' ? trade.price : undefined,
+            spread: undefined,
+            liquidity: undefined,
+            volume: undefined,
+            timeToResolution: undefined,
+            collectedAt: new Date(),
+          };
+        }
         
         if (!marketSnapshot) {
           console.warn(`[monitor:trades] Could not get market snapshot for ${trade.conditionId}`);
@@ -78,12 +117,24 @@ async function monitorTrades() {
         const scoringInput: TradeScoringInput = {
           wallet: {
             address: wallet.address,
-            label: undefined,
+            label: wallet.label || undefined,
             globalScore: wallet.globalScore,
             bestCategory: wallet.bestCategory || undefined,
-            categoryStrengths: {}, // Would load from wallet profile
-            averageEntryTiming: 0,
+            categoryStrengths: wallet.categoryStrengthsJson ? JSON.parse(wallet.categoryStrengthsJson) : {},
+            averageEntryTiming: wallet.averageEntryTiming,
             status: 'TRACK',
+            roi30d: wallet.roi30d,
+            consistencyScore: wallet.consistencyScore,
+            copyabilityScore: wallet.copyabilityScore,
+            oneHitWonderPenalty: wallet.oneHitWonderPenalty,
+            averageTradeSize: wallet.averageTradeSize,
+            tradeCount30d: wallet.tradeCount30d,
+            resolvedTradeCount30d: wallet.resolvedTradeCount30d,
+            winRate30d: wallet.winRate30d,
+            averageLiquidity: wallet.averageLiquidity,
+            averageSpread: wallet.averageSpread,
+            sourceRank: wallet.sourceRank || undefined,
+            statusReason: wallet.statusReason || '',
           },
           trade: trade,
           market: marketSnapshot,
@@ -112,7 +163,7 @@ async function monitorTrades() {
             spreadScore: tradeScore.spread,
             liquidityScore: tradeScore.liquidity,
             thesisScore: tradeScore.thesis,
-            simulatedPositionSize: calculateSimulatedPositionSize(tradeScore),
+            simulatedPositionSize: calculateSimulatedPositionSize(tradeScore.total),
           },
         });
         
@@ -130,7 +181,7 @@ async function monitorTrades() {
             currentPrice: trade.outcome.toLowerCase() === 'yes' 
               ? (marketSnapshot.yesPrice || trade.price)
               : (marketSnapshot.noPrice || trade.price),
-            simulatedPositionSize: calculateSimulatedPositionSize(tradeScore),
+            simulatedPositionSize: calculateSimulatedPositionSize(tradeScore.total),
           });
           paperCopied++;
         } else if (tradeScore.decision === 'WATCHLIST') {

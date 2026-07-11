@@ -1,8 +1,8 @@
 // src/scripts/scan-leaderboard.ts
 // Leaderboard scanner - fetches top 500 wallets from Polymarket
 
-import { getLeaderboard } from '@/lib/api/polymarket-client';
-import { prisma } from '@/lib/db/client';
+import { getLeaderboard } from '../lib/api/polymarket-client';
+import { prisma } from '../lib/db/client';
 
 async function scanLeaderboard() {
   console.log('[scan:leaderboard] Starting leaderboard scan...');
@@ -53,6 +53,14 @@ async function scanLeaderboard() {
           label: entry.label,
           sourceRank: entry.rank,
           status: 'IGNORE', // Will be updated by wallet scanner
+          categoryStrengthsJson: JSON.stringify({}),
+          averageTradeSize: 0,
+          tradeCount30d: 0,
+          resolvedTradeCount30d: 0,
+          winRate30d: 0,
+          averageLiquidity: 0,
+          averageSpread: 0,
+          averageEntryTiming: 0,
         },
       });
     }

@@ -73,7 +73,7 @@ export default async function WalletsPage() {
                 <td className="p-4 font-mono">{wallet.oneHitWonderPenalty.toFixed(2)}</td>
                 <td className="p-4 font-bold">{wallet.globalScore.toFixed(3)}</td>
                 <td className="p-4">{wallet.bestCategory || '-'}</td>
-                <td className="p-4 text-gray-500 max-w-xs truncate">{wallet.statusReason}</td>
+                <td className="p-4 text-gray-500 max-w-xs truncate">{wallet.status === 'IGNORE' ? 'Below threshold' : wallet.status === 'TRACK' ? 'High score, tracking' : 'Watching for opportunities'}</td>
                 <td className="p-4">
                   <Link 
                     href={`/dashboard/wallets/${wallet.address}`}

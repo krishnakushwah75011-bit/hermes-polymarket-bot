@@ -1,7 +1,7 @@
 // lib/scoring/wallet-scorer.ts
 // Wallet scoring engine with ROI, consistency, copyability, one-hit-wonder penalty
 
-import { ParsedWalletTrade, WalletScore, RuleSet } from '@/lib/types';
+import { ParsedWalletTrade, WalletScore, RuleSet } from '../types';
 
 export interface WalletRawData {
   address: string;

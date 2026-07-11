@@ -209,7 +209,7 @@ export default async function DashboardPage() {
                     {decision.observedTrade?.marketQuestion ? decision.observedTrade.marketQuestion.slice(0, 40) + '...' : (decision.marketId ?? 'Unknown market')}
                   </td>
                   <td className="py-2 pr-4">
-                    <DecisionBadge decision={decision.decision} />
+                    <DecisionBadge decision={decision.decision as 'PAPER_COPY' | 'WATCHLIST' | 'SKIP'} />
                   </td>
                   <td className="py-2 pr-4 font-mono">
                     {decision.copyScore.toFixed(2)}
@@ -235,8 +235,8 @@ export default async function DashboardPage() {
 }
 
 // Components
-function MetricCard({ title, value, subtext, color }: any) {
-  const colors = {
+function MetricCard({ title, value, subtext, color }: { title: string; value: string; subtext: string; color: 'green' | 'red' | 'blue' | 'purple' | 'orange' | 'gray' }) {
+  const colors: Record<'green' | 'red' | 'blue' | 'purple' | 'orange' | 'gray', string> = {
     green: 'bg-green-50 text-green-700 border-green-200',
     red: 'bg-red-50 text-red-700 border-red-200',
     blue: 'bg-blue-50 text-blue-700 border-blue-200',
@@ -265,7 +265,7 @@ function Card({ title, children }: any) {
   );
 }
 
-function PnLChart({ data }: any) {
+function PnLChart({ data }: { data: { date: string; pnl: number }[] }) {
   // Simple SVG chart
   const width = '100%';
   const height = 256;
@@ -303,8 +303,8 @@ function PnLChart({ data }: any) {
   );
 }
 
-function DecisionBadge({ decision }: any) {
-  const styles = {
+function DecisionBadge({ decision }: { decision: 'PAPER_COPY' | 'WATCHLIST' | 'SKIP' }) {
+  const styles: Record<'PAPER_COPY' | 'WATCHLIST' | 'SKIP', string> = {
     PAPER_COPY: 'bg-green-100 text-green-700',
     WATCHLIST: 'bg-yellow-100 text-yellow-700',
     SKIP: 'bg-gray-100 text-gray-700',

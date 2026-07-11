@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 export interface RuleSet {
+  id: string;
   version: number;
   active: boolean;
   rules: {
@@ -20,6 +21,7 @@ export interface RuleSet {
     minLiquidity: number;
     maxSpread: number;
     maxEntryTimingHours: number;
+    maxPriceMovementSinceEntry: number;
     
     // Trade scoring thresholds
     minTradeScoreForCopy: number;
@@ -64,6 +66,7 @@ export interface RuleSet {
 }
 
 export const DEFAULT_RULESET: RuleSet = {
+  id: '',
   version: 1,
   active: true,
   rules: {
@@ -77,6 +80,7 @@ export const DEFAULT_RULESET: RuleSet = {
     minLiquidity: 1000,
     maxSpread: 0.05,
     maxEntryTimingHours: 72,
+    maxPriceMovementSinceEntry: 0.15,
     
     minTradeScoreForCopy: 0.65,
     minTradeScoreForWatch: 0.45,
@@ -192,6 +196,7 @@ export async function getActiveRuleSet(): Promise<RuleSet> {
   
   if (active) {
     return {
+      id: active.id,
       version: active.version,
       active: active.active,
       rules: JSON.parse(active.rulesJson),
@@ -218,6 +223,7 @@ export async function createRuleSet(ruleSet: RuleSet): Promise<RuleSet> {
   });
   
   return {
+    id: created.id,
     version: created.version,
     active: created.active,
     rules: JSON.parse(created.rulesJson),
@@ -288,6 +294,7 @@ export async function runWeeklyRuleAdaptation(): Promise<RuleSet | null> {
   // Create new version
   const newVersion = activeRuleSet.version + 1;
   const newRuleSet = await createRuleSet({
+    id: '', // Will be set by DB
     version: newVersion,
     active: true,
     rules: newRules,

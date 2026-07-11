@@ -155,8 +155,8 @@ export default async function PaperTradesPage() {
   );
 }
 
-function SummaryCard({ title, value, color }: any) {
-  const colors = {
+function SummaryCard({ title, value, color }: { title: string; value: string; color: 'green' | 'red' | 'blue' | 'purple' | 'orange' }) {
+  const colors: Record<'green' | 'red' | 'blue' | 'purple' | 'orange', string> = {
     green: 'text-green-600',
     red: 'text-red-600',
     blue: 'text-blue-600',

@@ -1,10 +1,10 @@
 // src/scripts/scan-wallets.ts
 // Wallet scanner - fetches 30-day trade history for tracked wallets and scores them
 
-import { getAllWalletTrades, getActiveMarkets, collectMarketSnapshot } from '@/lib/api/polymarket-client';
-import { scoreWallet, WalletRawData } from '@/lib/scoring/wallet-scorer';
-import { prisma } from '@/lib/db/client';
-import { parseJsonField } from '@/lib/api/polymarket-client';
+import { getAllWalletTrades, getActiveMarkets, collectMarketSnapshot } from '../lib/api/polymarket-client';
+import { scoreWallet, WalletRawData } from '../lib/scoring/wallet-scorer';
+import { prisma } from '../lib/db/client';
+import { parseJsonField } from '../lib/api/polymarket-client';
 
 async function scanWallets() {
   console.log('[scan:wallets] Starting wallet scan...');

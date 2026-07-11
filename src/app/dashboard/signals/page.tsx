@@ -55,9 +55,9 @@ export default async function SignalsPage() {
                 <td className="p-4 font-mono">{signal.observedTrade?.walletEntryPrice.toFixed(3) || 'N/A'}</td>
                 <td className="p-4 font-mono">{signal.observedTrade?.detectedPrice?.toFixed(3) || 'N/A'}</td>
                 <td className="p-4">
-                  {signal.priceMovement !== undefined ? (
-                    <span className={`font-mono ${signal.priceMovement > 0.5 ? 'text-green-600' : 'text-red-600'}`}>
-                      {(signal.priceMovement * 100).toFixed(1)}%
+                  {signal.roiScore !== undefined ? (
+                    <span className={`font-mono ${signal.roiScore > 0.5 ? 'text-green-600' : 'text-red-600'}`}>
+                      {(signal.roiScore * 100).toFixed(1)}%
                     </span>
                   ) : 'N/A'}
                 </td>

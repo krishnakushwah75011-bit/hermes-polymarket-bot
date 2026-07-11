@@ -185,6 +185,7 @@ export interface ParsedWalletTrade {
   side: 'BUY' | 'SELL';
   size: number;
   price: number;
+  walletEntryPrice: number;
   timestamp: Date;
   transactionHash: string;
   title?: string;
@@ -210,6 +211,7 @@ export interface MarketSnapshot {
 export interface WalletScore {
   address: string;
   label?: string;
+  sourceRank?: number;
   roi30d: number;
   consistencyScore: number;
   copyabilityScore: number;
@@ -224,8 +226,11 @@ export interface WalletScore {
   averageLiquidity: number;
   averageSpread: number;
   averageEntryTiming: number;
+  copyabilityNotes?: string;
+  riskNotes?: string;
   status: 'TRACK' | 'WATCH' | 'IGNORE';
   statusReason: string;
+  walletEntryPrice?: number;
 }
 
 export interface TradeScore {
@@ -280,7 +285,6 @@ export interface RuleSet {
     minLiquidityForCopy: number;
     maxSpreadForCopy: number;
     minTimeToResolutionHours: number;
-    maxEntryTimingHours: number;
 
     // Weights
     walletScoreWeights: {

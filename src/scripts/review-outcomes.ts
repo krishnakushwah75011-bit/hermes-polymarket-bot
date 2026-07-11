@@ -1,8 +1,9 @@
 // src/scripts/review-outcomes.ts
 // Outcome reviewer - reviews resolved paper trades and evaluates decision quality
 
-import { getActiveRuleSet } from '@/lib/rules/rules-engine';
-import { prisma } from '@/lib/db/client';
+import { getActiveRuleSet, createRuleSet } from '../lib/rules/rules-engine';
+import { prisma } from '../lib/db/client';
+import type { WalletScore } from '../lib/types';
 
 async function reviewOutcomes() {
   console.log('[review:outcomes] Starting outcome review...');
@@ -167,6 +168,8 @@ function generateLessons(
     lessons.push(`Low score (${score.toFixed(2)}) but won - consider lowering watch threshold`);
   }
   
+  const wasDecisionGood = paperTrade.realizedPnl > 0;
+  
   return {
     decision: decisionJournal.decision,
     score,
@@ -186,7 +189,11 @@ async function feedLessonsToRulesEngine() {
       reviewTime: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
     },
     include: {
-      decisionJournal: true,
+      decisionJournal: {
+        include: {
+          walletProfile: true,
+        },
+      },
     },
   });
   
@@ -197,108 +204,165 @@ async function feedLessonsToRulesEngine() {
   
   const rules = await getActiveRuleSet();
   const currentRules = rules.rules;
-  const updates: { parameter: string; oldValue: any; newValue: any; reason: string }[] = [];
   
-  // Analyze patterns
+  // Calculate statistics
+  let lowLiqLosses = 0;
+  let lowLiqTotal = 0;
+  let wideSpreadLosses = 0;
+  let wideSpreadTotal = 0;
+  const categoryWinRates: Record<string, { wins: number; total: number }> = {};
+  let oneHitWonderLosses = 0;
+  let oneHitWonderTotal = 0;
+  let lateEntryLosses = 0;
+  let lateEntryTotal = 0;
+  let subThresholdWalletWins = 0;
+  let subThresholdWalletTotal = 0;
   
-  // 1. Low-liquidity losses
-  const lowLiqLosses = recentReviews.filter(r => 
-    !r.wasDecisionGood && 
-    r.decisionJournal.liquidityScore < 0.3
-  ).length;
-  const lowLiqTotal = recentReviews.filter(r => r.decisionJournal.liquidityScore < 0.3).length;
-  
-  if (lowLiqTotal >= 5 && lowLiqLosses / lowLiqTotal > 0.65) {
-    const oldValue = currentRules.minLiquidityForCopy || 1000;
-    const newValue = Math.round(oldValue * 1.5);
-    updates.push({
-      parameter: 'minLiquidityForCopy',
-      oldValue,
-      newValue,
-      reason: `${lowLiqLosses}/${lowLiqTotal} low-liquidity trades lost (${(lowLiqLosses/lowLiqTotal*100).toFixed(0)}%)`,
-    });
+  for (const review of recentReviews) {
+    const decisionJournal = review.decisionJournal;
+    if (!decisionJournal) continue;
+    
+    const isLoss = !review.wasDecisionGood;
+    
+    // Low liquidity
+    if (decisionJournal.liquidityScore < 0.2) {
+      lowLiqTotal++;
+      if (!review.wasDecisionGood) lowLiqLosses++;
+    }
+    
+    // Wide spread
+    if (decisionJournal.spreadScore < 0.3) {
+      wideSpreadTotal++;
+      if (isLoss) wideSpreadLosses++;
+    }
+    
+    // Category tracking
+    if (decisionJournal.walletProfile?.bestCategory) {
+      const cat = decisionJournal.walletProfile.bestCategory;
+      if (!categoryWinRates[cat]) categoryWinRates[cat] = { wins: 0, total: 0 };
+      categoryWinRates[cat].total++;
+      if (!review.wasDecisionGood) categoryWinRates[cat].wins++;
+    }
+    
+    // One-hit-wonder
+    if (decisionJournal.walletQualityScore > 0.7 && isLoss) {
+      oneHitWonderTotal++;
+      if (isLoss) oneHitWonderLosses++;
+    }
+    
+    // Late entry
+    if (decisionJournal.entryTimingScore > 0.85) {
+      lateEntryTotal++;
+      if (isLoss) lateEntryLosses++;
+    }
+    
+    // Sub-threshold wallets
+    if (decisionJournal.walletQualityScore < 0.4 && !review.wasDecisionGood) {
+      subThresholdWalletTotal++;
+      subThresholdWalletWins++;
+    }
   }
   
-  // 2. Wide-spread losses
-  const wideSpreadLosses = recentReviews.filter(r => 
-    !r.wasDecisionGood && 
-    r.decisionJournal.spreadScore < 0.3
-  ).length;
-  const wideSpreadTotal = recentReviews.filter(r => r.decisionJournal.spreadScore < 0.3).length;
+  // Calculate aggregate stats
+  const lowLiqLossRate = lowLiqTotal > 0 ? lowLiqLosses / lowLiqTotal : 0;
+  const wideSpreadLossRate = wideSpreadTotal > 0 ? wideSpreadLosses / wideSpreadTotal : 0;
   
-  if (wideSpreadTotal >= 5 && wideSpreadLosses / wideSpreadTotal > 0.65) {
-    const oldValue = currentRules.maxSpreadForCopy || 0.05;
-    const newValue = Math.round(oldValue * 0.7 * 100) / 100;
-    updates.push({
-      parameter: 'maxSpreadForCopy',
-      oldValue,
-      newValue,
-      reason: `${wideSpreadLosses}/${wideSpreadTotal} wide-spread trades lost`,
-    });
+  // Find best category
+  let bestCategory = '';
+  let bestCategoryWinRate = 0;
+  let bestCategoryTotal = 0;
+  let avgWinRate = 0;
+  let totalWins = 0;
+  let totalTrades = 0;
+  
+  for (const [cat, rates] of Object.entries(categoryWinRates)) {
+    const winRate = rates.total > 0 ? rates.wins / rates.total : 0;
+    totalWins += rates.wins;
+    totalTrades += rates.total;
+    if (rates.total >= 5 && winRate > bestCategoryWinRate) {
+      bestCategoryWinRate = winRate;
+      bestCategory = cat;
+      bestCategoryTotal = rates.total;
+    }
   }
+  avgWinRate = totalTrades > 0 ? totalWins / totalTrades : 0;
   
-  // 3. Category outperformance
-  // Would analyze categoryMatch scores by category
+  // Define rule updates with flexible parameter names
+  type RuleUpdate = { parameter: string; condition: boolean; adjustment: (currentValue: number) => number; reason: string };
   
-  // 4. One-hit-wonder losses
-  const ohwLosses = recentReviews.filter(r => 
-    !r.wasDecisionGood && 
-    r.decisionJournal.walletQualityScore > 0.7 && // high wallet score but lost
-    r.lessonsJson.includes('one-hit-wonder')
-  ).length;
+  const ruleDefinitions = [
+    { parameter: 'minLiquidityForCopy', condition: lowLiqTotal >= 5 && lowLiqTotal > 0 && lowLiqLosses / lowLiqTotal > 0.65, adjustment: (currentValue: number) => Math.round(currentValue * 1.5), reason: `Low-liquidity trades losing ${(lowLiqLosses/lowLiqTotal*100).toFixed(0)}%` },
+    { parameter: 'maxSpreadForCopy', condition: wideSpreadTotal >= 5 && wideSpreadTotal > 0 && wideSpreadLosses / wideSpreadTotal > 0.65, adjustment: (currentValue: number) => Math.round(currentValue * 0.7 * 100) / 100, reason: `Wide-spread trades losing ${(wideSpreadLosses/wideSpreadTotal*100).toFixed(0)}%` },
+    { parameter: 'tradeScoreWeights.categoryMatch', condition: bestCategoryTotal >= 10 && bestCategoryTotal > 0 && bestCategoryWinRate > avgWinRate * 1.3, adjustment: (currentValue: number) => Math.min(currentValue * 1.5, 0.3), reason: `Category ${bestCategory} win rate ${(bestCategoryWinRate*100).toFixed(0)}% vs avg ${(avgWinRate*100).toFixed(0)}%` },
+    { parameter: 'maxOneHitWonderPenalty', condition: true && oneHitWonderTotal >= 5 && oneHitWonderTotal > 0 && oneHitWonderLosses / oneHitWonderTotal > 0.7, adjustment: (currentValue: number) => Math.min(currentValue * 1.2, 0.8), reason: `High-penalty wallets losing ${(oneHitWonderLosses/oneHitWonderTotal*100).toFixed(0)}%` },
+    { parameter: 'maxPriceMovementSinceEntry', condition: lateEntryTotal >= 5 && lateEntryTotal > 0 && lateEntryLosses / lateEntryTotal > 0.7, adjustment: (currentValue: number) => Math.round(currentValue * 0.8 * 100) / 100, reason: `Late entries losing ${(lateEntryLosses/lateEntryTotal*100).toFixed(0)}%` },
+    { parameter: 'minGlobalScoreForWatch', condition: subThresholdWalletTotal >= 10 && subThresholdWalletTotal > 0 && subThresholdWalletWins / subThresholdWalletTotal > 0.6, adjustment: (currentValue: number) => Math.max(currentValue * 0.95, 0.35), reason: `Below-threshold wallets winning ${(subThresholdWalletWins/subThresholdWalletTotal*100).toFixed(0)}%` },
+  ];
+  
+  const updates: Array<{ parameter: string; oldValue: number; newValue: number; reason: string }> = [];
+  
+  for (const rule of ruleDefinitions) {
+      if (rule.condition) {
+        // Handle nested paths like "tradeScoreWeights.categoryMatch"
+        const pathParts = rule.parameter.split('.');
+        let currentValue: any = currentRules;
+        for (const part of pathParts) {
+          currentValue = currentValue?.[part];
+        }
+        const oldValue = currentValue;
+        const newValue = rule.adjustment(oldValue as number);
+        updates.push({ parameter: rule.parameter, oldValue: oldValue as number, newValue: newValue as number, reason: rule.reason });
+      }
+    }
   
   if (updates.length > 0) {
-    await createRuleVersion(currentRules, updates);
-  }
-  
-  console.log(`[review:outcomes] Rule updates: ${updates.length}`);
-}
-
-async function createRuleVersion(currentRules: any, updates: any[]) {
-  const currentVersion = await prisma.ruleSet.findFirst({
-    where: { active: true },
-    orderBy: { version: 'desc' },
-  });
-  
-  const newVersion = (currentVersion?.version || 0) + 1;
-  
-  // Apply updates to rules
-  const newRules = { ...currentRules };
-  for (const update of updates) {
-    newRules[update.parameter] = update.newValue;
-  }
-  
-  // Create new rule set
-  const newRuleSet = await prisma.ruleSet.create({
-    data: {
+    const currentVersion = await prisma.ruleSet.findFirst({
+      where: { active: true },
+      orderBy: { version: 'desc' },
+    });
+    
+    const newVersion = (currentVersion?.version || 0) + 1;
+    
+    // Apply updates to rules
+    const newRules: Record<string, any> = JSON.parse(JSON.stringify(currentRules));
+    for (const update of updates) {
+      newRules[update.parameter] = update.newValue;
+    }
+    
+    await createRuleSet({
+      id: '',
       version: newVersion,
       active: true,
-      rulesJson: JSON.stringify(newRules),
-    },
-  });
-  
-  // Deactivate old
-  if (currentVersion) {
-    await prisma.ruleSet.update({
-      where: { id: currentVersion.id },
-      data: { active: false },
+      rules: newRules as any,
     });
+    
+    // Deactivate old
+    if (currentVersion) {
+      await prisma.ruleSet.update({
+        where: { id: currentVersion.id },
+        data: { active: false },
+      });
+    }
+    
+    // Record changes
+    for (const update of updates) {
+      await prisma.ruleChange.create({
+        data: {
+          oldRuleSetId: currentVersion?.id || '',
+          newRuleSetId: (await prisma.ruleSet.findFirst({ where: { version: newVersion, active: true } }))?.id || '',
+          changedBy: 'hermes',
+          reason: update.reason,
+          evidenceSummary: `Based on ${recentReviews.length} recent outcome reviews`,
+          beforeJson: JSON.stringify({ [update.parameter]: update.oldValue }),
+          afterJson: JSON.stringify({ [update.parameter]: update.newValue }),
+        },
+      });
+    }
+    
+    console.log(`[review:outcomes] Rule updates: ${updates.length}`);
   }
   
-  // Record changes
-  for (const update of updates) {
-    await prisma.ruleChange.create({
-      data: {
-        oldRuleSetId: currentVersion?.id || newRuleSet.id,
-        newRuleSetId: newRuleSet.id,
-        changedBy: 'hermes',
-        reason: update.reason,
-        evidenceSummary: `Based on ${recentReviews.length} recent outcome reviews`,
-        beforeJson: JSON.stringify({ [update.parameter]: update.oldValue }),
-        afterJson: JSON.stringify({ [update.parameter]: update.newValue }),
-      },
-    });
-  }
+  console.log(`[review:outcomes] Rule updates: ${0}`);
 }
 
 if (require.main === module) {

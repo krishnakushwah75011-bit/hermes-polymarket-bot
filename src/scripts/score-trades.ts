@@ -1,10 +1,10 @@
 // src/scripts/score-trades.ts
 // Trade scorer - scores pending observed trades and makes decisions
 
-import { scoreTrade, TradeScoringInput } from '@/lib/scoring/trade-scorer';
-import { getActiveRuleSet } from '@/lib/rules/rules-engine';
-import { prisma } from '@/lib/db/client';
-import { calculateSimulatedPositionSize } from '@/lib/engine/paper-engine';
+import { scoreTrade, TradeScoringInput } from '../lib/scoring/trade-scorer';
+import { getActiveRuleSet } from '../lib/rules/rules-engine';
+import { prisma } from '../lib/db/client';
+import { calculateSimulatedPositionSize } from '../lib/engine/paper-engine';
 
 async function scoreTrades() {
   console.log('[score:trades] Starting trade scoring...');
@@ -76,12 +76,24 @@ async function scoreTrades() {
       const scoringInput: TradeScoringInput = {
         wallet: {
           address: wallet.address,
-          label: wallet.label,
+          label: wallet.label || undefined,
           globalScore: wallet.globalScore,
           bestCategory: wallet.bestCategory || undefined,
           categoryStrengths: JSON.parse(wallet.categoryStrengthsJson || '{}'),
           averageEntryTiming: wallet.averageEntryTiming,
           status: wallet.status,
+          roi30d: wallet.roi30d,
+          consistencyScore: wallet.consistencyScore,
+          copyabilityScore: wallet.copyabilityScore,
+          oneHitWonderPenalty: wallet.oneHitWonderPenalty,
+          averageTradeSize: wallet.averageTradeSize,
+          tradeCount30d: wallet.tradeCount30d,
+          resolvedTradeCount30d: wallet.resolvedTradeCount30d,
+          winRate30d: wallet.winRate30d,
+          averageLiquidity: wallet.averageLiquidity,
+          averageSpread: wallet.averageSpread,
+          sourceRank: wallet.sourceRank || undefined,
+          statusReason: wallet.statusReason || '',
         },
         trade: {
           id: trade.id,
@@ -89,11 +101,12 @@ async function scoreTrades() {
           marketId: trade.marketId,
           conditionId: trade.conditionId,
           marketQuestion: trade.marketQuestion,
-          marketCategory: trade.marketCategory,
+          marketCategory: trade.marketCategory || undefined,
           outcome: trade.outcome,
-          side: trade.side,
+          side: trade.side as 'BUY' | 'SELL',
           size: trade.size,
           price: trade.walletEntryPrice,
+          walletEntryPrice: trade.walletEntryPrice,
           timestamp: trade.timestamp,
           transactionHash: trade.rawTradeJson ? JSON.parse(trade.rawTradeJson).transactionHash : '',
         },
@@ -101,22 +114,22 @@ async function scoreTrades() {
           marketId: market.marketId,
           conditionId: market.conditionId,
           question: market.question,
-          category: market.category,
-          yesPrice: market.yesPrice,
-          noPrice: market.noPrice,
-          bestBid: market.bestBid,
-          bestAsk: market.bestAsk,
-          spread: market.spread,
-          liquidity: market.liquidity,
-          volume: market.volume,
-          timeToResolution: market.timeToResolution,
+          category: market.category || undefined,
+          yesPrice: market.yesPrice || undefined,
+          noPrice: market.noPrice || undefined,
+          bestBid: market.bestBid || undefined,
+          bestAsk: market.bestAsk || undefined,
+          spread: market.spread || undefined,
+          liquidity: market.liquidity || undefined,
+          volume: market.volume || undefined,
+          timeToResolution: market.timeToResolution || undefined,
           collectedAt: market.collectedAt,
         },
         rules: rules.rules,
       };
       
       const tradeScore = scoreTrade(scoringInput);
-      const positionSize = calculateSimulatedPositionSize(tradeScore);
+      const positionSize = calculateSimulatedPositionSize(tradeScore.total);
       
       // Create decision journal
       await prisma.decisionJournal.create({

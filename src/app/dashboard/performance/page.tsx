@@ -10,7 +10,12 @@ export default async function PerformancePage() {
   const paperTrades = await prisma.paperTrade.findMany({
     orderBy: { openedAt: 'asc' },
     include: {
-      decisionJournal: { include: { walletProfile: true } },
+      decisionJournal: { 
+        include: { 
+          walletProfile: true,
+          observedTrade: true
+        } 
+      },
     },
   });
   
@@ -53,7 +58,7 @@ export default async function PerformancePage() {
   const walletPerf: Record<string, { trades: number; wins: number; pnl: number; label?: string }> = {};
   for (const trade of closedTrades) {
     const addr = trade.walletAddress;
-    if (!walletPerf[addr]) walletPerf[addr] = { trades: 0, wins: 0, pnl: 0, label: trade.decisionJournal?.walletProfile?.label };
+    if (!walletPerf[addr]) walletPerf[addr] = { trades: 0, wins: 0, pnl: 0, label: trade.decisionJournal?.walletProfile?.label || '' };
     walletPerf[addr].trades++;
     if (trade.realizedPnl > 0) walletPerf[addr].wins++;
     walletPerf[addr].pnl += trade.realizedPnl;
@@ -165,8 +170,8 @@ export default async function PerformancePage() {
   );
 }
 
-function SummaryCard({ title, value, color }: any) {
-  const colors = {
+function SummaryCard({ title, value, color }: { title: string; value: string; color: 'green' | 'red' | 'blue' | 'purple' | 'orange' }) {
+  const colors: Record<'green' | 'red' | 'blue' | 'purple' | 'orange', string> = {
     green: 'text-green-600',
     red: 'text-red-600',
     blue: 'text-blue-600',

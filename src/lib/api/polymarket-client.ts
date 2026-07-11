@@ -15,11 +15,13 @@ import {
   ClobOrderbookResponse,
   ClobPriceHistoryResponse,
   ClobMarketsResponse,
+  ClobPricePoint,
+  ClobMarket,
   DataApiTrade,
   DataApiTradesResponse,
   ParsedWalletTrade,
   MarketSnapshot,
-} from '@/lib/types';
+} from '../types';
 
 const GAMMA_API = process.env.POLYMARKET_GAMMA_API || 'https://gamma-api.polymarket.com';
 const CLOB_API = process.env.POLYMARKET_CLOB_API || 'https://clob.polymarket.com';
@@ -77,7 +79,7 @@ async function fetchJson<T>(url: string, api: keyof typeof rateLimiters): Promis
 }
 
 // Parse double-encoded JSON fields
-function parseJsonField<T>(val: string | T): T {
+export function parseJsonField<T>(val: string | T): T {
   if (typeof val === 'string') {
     try {
       return JSON.parse(val);
@@ -166,7 +168,17 @@ export async function getMarketBySlug(slug: string): Promise<ParsedMarket | null
     `${GAMMA_API}/markets?slug=${encodeURIComponent(slug)}`,
     'gamma'
   );
-  
+
+  if (!data.length) return null;
+  return parseMarket(data[0]);
+}
+
+export async function getMarketByConditionId(conditionId: string): Promise<ParsedMarket | null> {
+  const data = await fetchJson<PolymarketMarket[]>(
+    `${GAMMA_API}/markets?conditionId=${encodeURIComponent(conditionId)}`,
+    'gamma'
+  );
+
   if (!data.length) return null;
   return parseMarket(data[0]);
 }
@@ -180,7 +192,7 @@ export async function getEventBySlug(slug: string): Promise<PolymarketEvent | nu
   return data[0] || null;
 }
 
-export async function getWalletTrades(address: string, limit = 200, cursor?: string): Promise<WalletTrade[]> {
+export async function getWalletTrades(address: string, limit = 200, cursor?: string): Promise<{ trades: WalletTrade[]; nextCursor?: string }> {
   const params = new URLSearchParams({
     address,
     limit: limit.toString(),
@@ -192,7 +204,7 @@ export async function getWalletTrades(address: string, limit = 200, cursor?: str
     'gamma'
   );
   
-  return data.trades || [];
+  return { trades: data.trades || [], nextCursor: data.nextCursor };
 }
 
 export async function getAllWalletTrades(address: string, lookbackDays = 30): Promise<ParsedWalletTrade[]> {
@@ -201,7 +213,8 @@ export async function getAllWalletTrades(address: string, lookbackDays = 30): Pr
   const cutoffDate = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
   
   do {
-    const trades = await getWalletTrades(address, 200, cursor);
+    const response = await getWalletTrades(address, 200, cursor);
+    const trades = response.trades;
     
     for (const trade of trades) {
       const tradeDate = new Date(trade.timestamp);
@@ -219,14 +232,15 @@ export async function getAllWalletTrades(address: string, lookbackDays = 30): Pr
         side: trade.side,
         size: trade.size,
         price: trade.price,
+        walletEntryPrice: trade.price,
         timestamp: tradeDate,
         transactionHash: trade.transactionHash,
         slug: trade.slug,
       });
     }
     
-    cursor = data.nextCursor;
-  } while (cursor && allTrades.length < 1000); // Safety cap
+    cursor = response.nextCursor;
+  } while (cursor && allTrades.length < 1000);
   
   return allTrades;
 }

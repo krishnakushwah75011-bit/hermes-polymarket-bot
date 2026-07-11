@@ -34,7 +34,7 @@ export default async function RulesPage() {
             <div key={key} className="bg-gray-50 p-4 rounded-lg">
               <p className="text-xs text-gray-500 font-mono">{key}</p>
               <p className="text-lg font-bold font-mono text-gray-900">
-                {typeof value === 'object' ? JSON.stringify(value) : value}
+                {typeof value === 'object' ? JSON.stringify(value) : String(value)}
               </p>
             </div>
           ))}

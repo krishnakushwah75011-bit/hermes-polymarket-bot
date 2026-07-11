@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 
 async function main() {
   console.log('Seeding database...');
-  
+
   // Create default rule set
   const defaultRules = {
     minRoi30d: 0.05,
@@ -20,15 +20,14 @@ async function main() {
     minLiquidity: 1000,
     maxSpread: 0.05,
     maxEntryTimingHours: 72,
-    
+
     minTradeScoreForCopy: 0.65,
     minTradeScoreForWatch: 0.45,
     minPriceMovementForCopy: 0.4,
     minLiquidityForCopy: 1000,
     maxSpreadForCopy: 0.05,
     minTimeToResolutionHours: 1,
-    maxEntryTimingHours: 72,
-    
+
     walletScoreWeights: {
       roi: 0.25,
       consistency: 0.20,
@@ -39,7 +38,7 @@ async function main() {
       diversity: 0.10,
       oneHitWonderPenalty: 0.30,
     },
-    
+
     tradeScoreWeights: {
       walletQuality: 0.30,
       priceMovement: 0.20,
@@ -49,11 +48,11 @@ async function main() {
       categoryMatch: 0.10,
       positionSize: 0.05,
     },
-    
+
     stopLossPercent: 0.20,
     takeProfitPercent: 0.50,
   };
-  
+
   await prisma.ruleSet.upsert({
     where: { version: 1 },
     update: { rulesJson: JSON.stringify(defaultRules), active: true },
@@ -63,9 +62,9 @@ async function main() {
       rulesJson: JSON.stringify(defaultRules),
     },
   });
-  
+
   console.log('Default rule set created');
-  
+
   // Create sample wallet profiles (for testing)
   const sampleWallets = [
     {
@@ -135,7 +134,7 @@ async function main() {
       riskNotes: 'Limited track record',
     },
   ];
-  
+
   for (const wallet of sampleWallets) {
     await prisma.walletProfile.upsert({
       where: { address: wallet.address },
@@ -143,7 +142,7 @@ async function main() {
       create: wallet,
     });
   }
-  
+
   console.log('Sample wallets created');
   console.log('Seeding complete!');
 }

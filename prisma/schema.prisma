@@ -40,6 +40,7 @@ model WalletProfile {
   averageEntryTiming    Float     @default(0) // hours before resolution
   copyabilityNotes      String?
   riskNotes             String?
+  statusReason          String?
   lastScannedAt         DateTime  @default(now())
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
@@ -68,6 +69,7 @@ model ObservedTrade {
   detectedPrice   Float
   size            Float    // shares
   timestamp       DateTime
+  transactionHash String?  // Transaction hash for deduplication
   rawTradeJson    String
   createdAt       DateTime @default(now())
 
@@ -78,6 +80,7 @@ model ObservedTrade {
   @@index([marketId])
   @@index([timestamp])
   @@index([conditionId])
+  @@index([transactionHash])
 }
 
 // Market Snapshot - hourly market data for PnL tracking

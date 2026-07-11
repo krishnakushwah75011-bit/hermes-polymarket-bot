@@ -68,7 +68,7 @@ export async function updatePaperTradePrices(): Promise<number> {
   if (openTrades.length === 0) return 0;
   
   // Group by market to fetch snapshots efficiently
-  const marketIds = [...new Set(openTrades.map(t => t.marketId))];
+  const marketIds = Array.from(new Set(openTrades.map(t => t.marketId)));
   const snapshots = await prisma.marketSnapshot.findMany({
     where: {
       marketId: { in: marketIds },

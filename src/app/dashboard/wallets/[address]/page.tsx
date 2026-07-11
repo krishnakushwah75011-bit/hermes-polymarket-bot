@@ -22,6 +22,9 @@ async function getWalletProfile(address: string) {
       paperTrades: {
         orderBy: { openedAt: 'desc' },
         take: 20,
+        include: {
+          decisionJournal: { include: { observedTrade: true } }
+        }
       },
       outcomeReviews: {
         orderBy: { reviewTime: 'desc' },
@@ -258,8 +261,8 @@ export default async function WalletProfilePage({ params }: { params: { address:
   );
 }
 
-function MetricCard({ title, value, color }: any) {
-  const colors = {
+function MetricCard({ title, value, color }: { title: string; value: string; color: 'green' | 'red' | 'blue' | 'purple' | 'orange' | 'gray' }) {
+  const colors: Record<'green' | 'red' | 'blue' | 'purple' | 'orange' | 'gray', string> = {
     green: 'text-green-600',
     red: 'text-red-600',
     blue: 'text-blue-600',

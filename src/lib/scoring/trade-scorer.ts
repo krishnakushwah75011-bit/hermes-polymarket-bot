@@ -1,7 +1,7 @@
 // lib/scoring/trade-scorer.ts
 // Trade scoring engine
 
-import { WalletScore, MarketSnapshot, ParsedWalletTrade, RuleSet } from '@/lib/types';
+import { WalletScore, MarketSnapshot, ParsedWalletTrade, RuleSet } from '../types';
 
 export interface TradeScore {
   walletQuality: number;
@@ -135,6 +135,7 @@ export function scoreTrade(input: TradeScoringInput): TradeScore {
     positionSize: 0.05,
   };
   
+  const weightSum = Object.values(weights).reduce((a: number, b: number) => a + b, 0);
   const total = clamp(
     walletQuality * weights.walletQuality +
     priceMovement * weights.priceMovement +
@@ -143,7 +144,7 @@ export function scoreTrade(input: TradeScoringInput): TradeScore {
     timeToResolution * weights.timeToResolution +
     categoryMatch * weights.categoryMatch +
     positionSize * weights.positionSize +
-    thesis * (1 - Object.values(weights).reduce((a, b) => a + b, 0)), // remaining weight
+    thesis * (1 - weightSum), // remaining weight
     0, 1
   );
   

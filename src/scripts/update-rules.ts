@@ -1,8 +1,9 @@
 // src/scripts/update-rules.ts
 // Automatic rule updater - reviews performance and updates scoring thresholds
 
-import { getActiveRuleSet } from '@/lib/rules/rules-engine';
-import { prisma } from '@/lib/db/client';
+import { getActiveRuleSet } from '../lib/rules/rules-engine';
+import { prisma } from '../lib/db/client';
+import type { RuleSet } from '../lib/types';
 
 async function updateRules() {
   console.log('[update:rules] Starting rule update...');
@@ -149,7 +150,9 @@ async function calculateAdaptationStats(): Promise<any> {
   
   const paperTrades = await prisma.paperTrade.findMany({
     where: { openedAt: { gte: thirtyDaysAgo } },
-    include: { decisionJournal: true },
+    include: { 
+      decisionJournal: { include: { walletProfile: true } },
+    },
   });
   
   let lowLiquidityTradeCount = 0;
