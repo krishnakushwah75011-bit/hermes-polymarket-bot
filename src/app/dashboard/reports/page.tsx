@@ -1,10 +1,10 @@
 // app/dashboard/reports/page.tsx
 // Reports page - daily and weekly reports
 
-'use client';
-
 import { PrismaClient } from '@prisma/client';
 import { format } from 'date-fns';
+
+export const dynamic = 'force-dynamic';
 
 const prisma = new PrismaClient();
 

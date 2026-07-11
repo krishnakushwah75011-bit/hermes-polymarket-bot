@@ -5,6 +5,8 @@ import { PrismaClient } from '@prisma/client';
 import { format } from 'date-fns';
 import Link from 'next/link';
 
+export const dynamic = 'force-dynamic';
+
 const prisma = new PrismaClient();
 
 async function getDashboardData() {
