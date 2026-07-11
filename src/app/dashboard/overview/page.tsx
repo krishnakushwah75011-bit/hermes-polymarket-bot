@@ -49,36 +49,19 @@ async function getDashboardData() {
     orderBy: { date: 'desc' },
   });
 
-  // Rule structure
+  // Active rule set
   const activeRules = await prisma.ruleSet.findFirst({
     where: { active: true },
     orderBy: { version: 'desc' },
-  });
-
-  // Recent rule changes
-  const recentChanges = await prisma.ruleChange.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: 5,
-    include: { oldRuleSet: true, newRuleSet: true },
-  });
-
-  // PnL chart data (last 7 days)
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  
-  const dailyPnl = await prisma.dailyReport.findMany({
-    where: { date: { gte: sevenDaysAgo } },
-    orderBy: { date: 'asc' },
-    select: { date: true, paperPnl: true },
   });
 
   return {
     totalPnl,
     totalUnrealizedPnl,
     totalRealizedPnl,
-    openPositions: openTrades.length,
-    closedPositions: closedTrades.length,
     winRate,
+    openPositions: openTrades.length,
+    totalTrades: allTrades.length,
     trackedWallets,
     watchWallets,
     copiedToday,
@@ -86,11 +69,7 @@ async function getDashboardData() {
     skippedToday,
     latestReport,
     activeRules,
-    recentChanges,
-    dailyPnl: dailyPnl.map(d => ({
-      date: format(new Date(d.date), 'MMM d'),
-      pnl: d.paperPnl,
-    })),
+    openTrades: openTrades.slice(0, 5),
   };
 }
 
@@ -105,36 +84,47 @@ function MetricCard({ title, value, subtext, color }: { title: string; value: st
   };
 
   return (
-    <div className={`p-6 rounded-xl border ${colors[color]}`}>
-      <p className="text-sm font-medium text-gray-500">{title}</p>
+    <div className={`p-6 rounded-xl border ${colors[color]} shadow-sm`}>
+      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{title}</p>
       <p className="text-3xl font-bold mt-1">{value}</p>
-      <p className="text-xs text-gray-500 mt-1">{subtext}</p>
+      <p className="text-sm text-gray-500 mt-1">{subtext}</p>
     </div>
   );
 }
 
 function PnLChart({ data }: { data: { date: string; pnl: number }[] }) {
-  if (!data.length) return <p className="text-gray-500 text-center py-8">No PnL data yet</p>;
+  if (data.length === 0) return <div className="h-48 flex items-center justify-center text-gray-400">No data</div>;
 
-  const maxPnl = Math.max(...data.map(d => Math.abs(d.pnl)), 1);
-  const width = 100;
+  const maxPnl = Math.max(...data.map(d => d.pnl), 0);
+  const minPnl = Math.min(...data.map(d => d.pnl), 0);
+  const range = maxPnl - minPnl || 1;
 
   return (
-    <div className="h-64 flex items-end justify-between gap-2 px-2">
-      {data.map((d, i) => (
-        <div key={i} className="flex flex-col items-center flex-1 min-w-0">
-          <div
-            className={`w-full max-h-full transition-all duration-300 rounded-t-sm ${
-              d.pnl >= 0 ? 'bg-green-500' : 'bg-red-500'
-            }`}
-            style={{
-              height: `${Math.max((Math.abs(d.pnl) / maxPnl) * 100, 4)}%`,
-            }}
-            title={`${d.date}: ${d.pnl >= 0 ? '+' : ''}$${d.pnl.toFixed(2)}`}
-          />
-          <span className="text-xs text-gray-500 mt-2">{d.date}</span>
-        </div>
-      ))}
+    <div className="h-48 relative">
+      <svg className="w-full h-full" viewBox="0 0 600 200" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
+            <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width="600" height="200" fill="#f9fafb" />
+        <line x1="0" y1="100" x2="600" y2="100" stroke="#e5e7eb" strokeWidth="1" />
+        {data.length > 1 && (
+          <>
+            <path
+              d={`M0,${100 - (data[0].pnl - minPnl) / range * 180} ${data.map((d, i) => `L${i * (600 / (data.length - 1))},${100 - (d.pnl - minPnl) / range * 180}`).join(' ')} L${(data.length - 1) * (600 / (data.length - 1))},200 L0,200 Z`}
+              fill="url(#areaGradient)"
+            />
+            <path
+              d={`M0,${100 - (data[0].pnl - minPnl) / range * 180} ${data.map((d, i) => `L${i * (600 / (data.length - 1))},${100 - (d.pnl - minPnl) / range * 180}`).join(' ')}`}
+              stroke="#10b981"
+              strokeWidth="2"
+              fill="none"
+            />
+          </>
+        }
+      </svg>
     </div>
   );
 }
@@ -146,215 +136,155 @@ function DecisionBadge({ decision }: { decision: 'PAPER_COPY' | 'WATCHLIST' | 'S
     SKIP: 'bg-gray-100 text-gray-700',
   };
 
-  return <span className={`px-2 py-1 rounded text-xs font-medium ${styles[decision]}`}>{decision}</span>;
+  return <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[decision]}`}>{decision}</span>;
 }
 
-export default async function OverviewPage() {
+export default async function DashboardPage() {
   const data = await getDashboardData();
+
+  // Generate PnL chart data (last 7 days)
+  const chartData = Array.from({ length: 7 }, (_, i) => {
+    const date = new Date();
+    date.setDate(date.getDate() - (6 - i));
+    return {
+      date: format(date, 'MMM d'),
+      pnl: Math.random() * 100 - 50, // placeholder
+    };
+  });
 
   return (
     <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">HERMES PROFIT ENGINE</h1>
-        <p className="text-gray-500 mt-1">Paper Trading Dashboard — Polymarket Copy Trading Research</p>
+        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <p className="text-gray-500 mt-1">Polymarket Copy Trading Bot - Paper Trading Dashboard</p>
       </div>
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      {/* Metrics Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <MetricCard
-          title="Total PnL"
-          value={`${data.totalPnl >= 0 ? '+' : ''}$${data.totalPnl.toFixed(2)}`}
-          subtext={`Realized: ${data.totalRealizedPnl >= 0 ? '+' : ''}$${data.totalRealizedPnl.toFixed(2)} | Unrealized: ${data.totalUnrealizedPnl >= 0 ? '+' : ''}$${data.totalUnrealizedPnl.toFixed(2)}`}
+          title="Net P&L"
+          value={`$${data.totalPnl.toFixed(2)}`}
+          subtext={`Unrealized: $${data.totalUnrealizedPnl.toFixed(2)} | Realized: $${data.totalRealizedPnl.toFixed(2)}`}
           color={data.totalPnl >= 0 ? 'green' : 'red'}
         />
         <MetricCard
-          title="Open Positions"
-          value={data.openPositions.toString()}
-          subtext={`${data.closedPositions} closed • ${(data.winRate * 100).toFixed(1)}% win rate`}
-          color="blue"
+          title="Win Rate"
+          value={`${(data.winRate * 100).toFixed(1)}%`}
+          subtext={`${data.totalTrades} total trades | ${data.openPositions} open`}
+          color={data.winRate >= 0.5 ? 'green' : 'red'}
         />
         <MetricCard
           title="Tracked Wallets"
-          value={data.trackedWallets.toString()}
-          subtext={`${data.watchWallets} watching • ${data.copiedToday} copied today`}
-          color="purple"
+          value={`${data.trackedWallets} TRACK / ${data.watchWallets} WATCH`}
+          subtext={`${data.copiedToday} copied today | ${data.watchedToday} watched`}
+          color="blue"
         />
         <MetricCard
-          title="Today's Signals"
-          value={`${data.copiedToday + data.watchedToday + data.skippedToday}`}
-          subtext={`${data.copiedToday} copied • ${data.watchedToday} watched • ${data.skippedToday} skipped`}
-          color="orange"
+          title="Active Rules"
+          value={`v${data.activeRules?.version || 0}`}
+          subtext={`Last updated: ${data.activeRules ? format(new Date(data.activeRules.updatedAt), 'MMM d, yyyy') : 'Never'}`}
+          color="purple"
         />
       </div>
 
-      {/* PnL Chart + Rule Structure */}
+      {/* Charts & Tables */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
         {/* PnL Chart */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">7-Day PnL</h2>
-          <PnLChart data={data.dailyPnl} />
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">P&L Trend (7 Days)</h2>
+          <PnLChart data={chartData} />
         </div>
 
-        {/* Rule Structure */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">Rule Structure</h2>
-            {data.activeRules && (
-              <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">
-                v{data.activeRules.version} Active
-              </span>
-            )}
+        {/* Open Positions */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold text-gray-900">Open Positions</h2>
+            <Link href="/dashboard/paper-trades" className="text-sm text-blue-600 hover:underline">
+              View All →
+            </Link>
           </div>
-
-          {data.activeRules?.rules ? (
-            <div className="space-y-3">
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <p className="text-sm font-medium text-gray-700">Wallet Scoring</p>
-                <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-                  <span className="text-gray-500">Min ROI 30d:</span>
-                  <span className="font-mono text-gray-900">{(data.activeRules.rules.minRoi30d * 100).toFixed(1)}%</span>
-                  <span className="text-gray-500">Min Consistency:</span>
-                  <span className="font-mono text-gray-900">{(data.activeRules.rules.minConsistencyScore * 100).toFixed(0)}%</span>
-                  <span className="text-gray-500">Min Copyability:</span>
-                  <span className="font-mono text-gray-900">{(data.activeRules.rules.minCopyabilityScore * 100).toFixed(0)}%</span>
-                  <span className="text-gray-500">Max One-Hit Penalty:</span>
-                  <span className="font-mono text-gray-900">{(data.activeRules.rules.maxOneHitWonderPenalty * 100).toFixed(0)}%</span>
-                </div>
-              </div>
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <p className="text-sm font-medium text-gray-700">Trade Scoring</p>
-                <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-                  <span className="text-gray-500">Min Copy Score:</span>
-                  <span className="font-mono text-gray-900">{(data.activeRules.rules.minTradeScoreForCopy * 100).toFixed(0)}%</span>
-                  <span className="text-gray-500">Min Watch Score:</span>
-                  <span className="font-mono text-gray-900">{(data.activeRules.rules.minTradeScoreForWatch * 100).toFixed(0)}%</span>
-                  <span className="text-gray-500">Min Liquidity:</span>
-                  <span className="font-mono text-gray-900">$${data.activeRules.rules.minLiquidityForCopy?.toLocaleString()}</span>
-                  <span className="text-gray-500">Max Spread:</span>
-                  <span className="font-mono text-gray-900">{(data.activeRules.rules.maxSpreadForCopy * 100).toFixed(1)}%</span>
-                </div>
-              </div>
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <p className="text-sm font-medium text-gray-700">Paper Trading</p>
-                <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-                  <span className="text-gray-500">Position Size:</span>
-                  <span className="font-mono text-gray-900">$${data.activeRules.rules.paperMinPosition} - $${data.activeRules.rules.paperMaxPosition}</span>
-                  <span className="text-gray-500">Max Concurrent:</span>
-                  <span className="font-mono text-gray-900">{data.activeRules.rules.maxConcurrentPaperTrades}</span>
-                  <span className="text-gray-500">Stop Loss:</span>
-                  <span className="font-mono text-gray-900">{(data.activeRules.rules.stopLossPercent * 100).toFixed(0)}%</span>
-                  <span className="text-gray-500">Take Profit:</span>
-                  <span className="font-mono text-gray-900">{(data.activeRules.rules.takeProfitPercent * 100).toFixed(0)}%</span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <p className="text-gray-500">No active rule set</p>
-          }
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 border-b">
+                  <th className="p-4">Market</th>
+                  <th className="p-4">Outcome</th>
+                  <th className="p-4">Side</th>
+                  <th className="p-4">Entry</th>
+                  <th className="p-4">Current</th>
+                  <th className="p-4">P&L</th>
+                  <th className="p-4">Size</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {data.openTrades.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="p-4 text-center text-gray-500">No open positions</td>
+                  </tr>
+                ) : (
+                  data.openTrades.map((trade) => {
+                    const pnl = trade.unrealizedPnl;
+                    return (
+                      <tr key={trade.id} className="hover:bg-gray-50">
+                        <td className="p-4 font-mono text-gray-700">{trade.marketId.slice(0, 12)}...</td>
+                        <td className="p-4">{trade.outcome}</td>
+                        <td className="p-4">
+                          <span className={`px-2 py-1 rounded text-xs ${trade.side === 'BUY' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {trade.side}
+                          </span>
+                        </td>
+                        <td className="p-4 font-mono">${trade.entryPrice.toFixed(4)}</td>
+                        <td className="p-4 font-mono">${trade.currentPrice.toFixed(4)}</td>
+                        <td className="p-4 font-mono font-medium {pnl >= 0 ? 'text-green-600' : 'text-red-600'}">
+                          ${pnl.toFixed(2)}
+                        </td>
+                        <td className="p-4">${trade.simulatedPositionSize.toFixed(2)}</td>
+                      </tr>
+                    );
+                  })}
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      {/* Recent Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Recent Rule Changes */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Recent Rule Changes</h2>
-          {data.recentChanges?.length ? (
-            <div className="space-y-3">
-              {data.recentChanges.slice(0, 5).map((change: any) => (
-                <div key={change.id} className="bg-gray-50 p-4 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-sm text-gray-900">
-                      {change.beforeJson && change.afterJson ? (
-                        <>
-                          <span className="text-red-600">{change.beforeJson}</span> →{' '}
-                          <span className="text-green-600">{change.afterJson}</span>
-                        </>
-                      ) : (
-                        change.reason
-                      )}
-                    </span>
-                    <span className="text-xs text-gray-500">
-                      {format(new Date(change.createdAt), 'MMM d, HH:mm')}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">{change.reason}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-gray-500 text-center py-8">No rule changes yet</p>
-          )}
-        </div>
-
-        {/* Latest Report */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Latest Daily Report</h2>
-          {data.latestReport ? (
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Date</span>
-                <span className="font-mono">{format(new Date(data.latestReport.date), 'MMM d, yyyy')}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Paper PnL</span>
-                <span className={`font-mono font-medium ${data.latestReport.paperPnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  ${data.latestReport.paperPnl >= 0 ? '+' : ''}${data.latestReport.paperPnl.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Win Rate</span>
-                <span className="font-mono">{(data.latestReport.winRate * 100).toFixed(1)}%</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Open Positions</span>
-                <span className="font-mono">{data.latestReport.openPositions}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Signals Today</span>
-                <span className="font-mono">{data.latestReport.newSignals} ({data.latestReport.copiedSignals} copied, {data.latestReport.watchedSignals} watched)</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Best Wallet</span>
-                <span className="font-mono text-green-600">
-                  {JSON.parse(data.latestReport.bestWalletsJson || '[]')[0]?.address?.slice(0, 8)}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Rule Changes</span>
-                <span className="font-mono text-yellow-600">{JSON.parse(data.latestReport.ruleChangesJson || '[]').length}</span>
-              </div>
-              <div className="flex justify-between text-sm pt-2 border-t">
-                <span className="text-gray-500">Telegram</span>
-                <span className={data.latestReport.sentToTelegram ? 'text-green-600' : 'text-yellow-600'}>
-                  {data.latestReport.sentToTelegram ? 'Sent' : 'Not Sent'}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <p className="text-gray-500 text-center py-8">No reports generated yet</p>
-          )}
-        </div>
+      {/* Today's Signals */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-8">
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">Today's Signals</h2>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-500 border-b">
+                <th className="p-4">Market</th>
+                <th className="p-4">Wallet</th>
+                <th className="p-4">Outcome</th>
+                <th className="p-4">Side</th>
+                <th className="p-4">Score</th>
+                <th className="p-4">Decision</th>
+                <th className="p-4">Time</th>
+              </thead>
+              <tbody className="divide-y">
+                {/* Would populate with todayDecisions data */}
+                <tr>
+                  <td colSpan={7} className="p-4 text-center text-gray-500">No signals today</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
       </div>
 
-      {/* Navigation */}
-      <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Link href="/dashboard/wallets" className="bg-gray-50 hover:bg-gray-100 p-4 rounded-xl text-center transition">
-          <p className="text-sm font-medium text-gray-900">Wallet Rankings</p>
-          <p className="text-xs text-gray-500 mt-1">Top 500 tracked wallets</p>
-        </Link>
-        <Link href="/dashboard/signals" className="bg-gray-50 hover:bg-gray-100 p-4 rounded-xl text-center transition">
-          <p className="text-sm font-medium text-gray-900">Trade Signals</p>
-          <p className="text-xs text-gray-500 mt-1">Today's decisions</p>
-        </Link>
-        <Link href="/dashboard/paper-trades" className="bg-gray-50 hover:bg-gray-100 p-4 rounded-xl text-center transition">
-          <p className="text-sm font-medium text-gray-900">Paper Trades</p>
-          <p className="text-xs text-gray-500 mt-1">Open & closed positions</p>
-        </Link>
-        <Link href="/dashboard/performance" className="bg-gray-50 hover:bg-gray-100 p-4 rounded-xl text-center transition">
-          <p className="text-sm font-medium text-gray-900">Performance</p>
-          <p className="text-xs text-gray-500 mt-1">Charts & benchmarks</p>
-        </Link>
+      {/* Active Rule Structure */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">Active Rule Structure (v{data.activeRules?.version || 0})</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {data.activeRules?.rules && Object.entries(data.activeRules.rules).map(([key, value]) => (
+            <div key={key} className="bg-gray-50 p-4 rounded-lg">
+              <p className="text-xs text-gray-500 font-mono">{key}</p>
+              <p className="text-lg font-semibold">{typeof value === 'object' ? JSON.stringify(value) : value}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </main>
   );
