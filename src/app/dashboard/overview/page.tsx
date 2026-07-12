@@ -110,20 +110,26 @@ function PnLChart({ data }: { data: { date: string; pnl: number }[] }) {
         </defs>
         <rect x="0" y="0" width="600" height="200" fill="#f9fafb" />
         <line x1="0" y1="100" x2="600" y2="100" stroke="#e5e7eb" strokeWidth="1" />
-        {data.length > 1 && (
-          <>
-            <path
-              d={`M0,${100 - (data[0].pnl - minPnl) / range * 180} ${data.map((d, i) => `L${i * (600 / (data.length - 1))},${100 - (d.pnl - minPnl) / range * 180}`).join(' ')} L${(data.length - 1) * (600 / (data.length - 1))},200 L0,200 Z`}
-              fill="url(#areaGradient)"
-            />
-            <path
-              d={`M0,${100 - (data[0].pnl - minPnl) / range * 180} ${data.map((d, i) => `L${i * (600 / (data.length - 1))},${100 - (d.pnl - minPnl) / range * 180}`).join(' ')}`}
-              stroke="#10b981"
-              strokeWidth="2"
-              fill="none"
-            />
-          </>
-        }
+        {data.length > 1 && (() => {
+                  const points = data.map((d, i) => `${i * (600 / (data.length - 1))},${100 - (d.pnl - minPnl) / range * 180}`).join(' ');
+                  const firstY = 100 - (data[0].pnl - minPnl) / range * 180;
+                  const lastX = (data.length - 1) * (600 / (data.length - 1));
+          
+                  return (
+                    <>
+                      <path
+                        d={`M0,${firstY} L${points} L${lastX},200 L0,200 Z`}
+                        fill="url(#areaGradient)"
+                      />
+                      <path
+                        d={`M0,${firstY} L${points}`}
+                        stroke="#10b981"
+                        strokeWidth="2"
+                        fill="none"
+                      />
+                    </>
+                  );
+                })()}
       </svg>
     </div>
   );
