@@ -121,26 +121,60 @@ export function parseMarket(market: PolymarketMarket): ParsedMarket {
 // ==================== GAMMA API ====================
 
 export async function getLeaderboard(limit = 500, period = '30d'): Promise<LeaderboardEntry[]> {
-  // Try Polymarket leaderboard
+  // Build leaderboard from Data API trades since no official leaderboard endpoint exists
+  // Fetch recent trades and aggregate by wallet
   try {
-    const data = await fetchJson<LeaderboardResponse>(
-      `${GAMMA_API}/leaderboard?limit=${limit}&period=${period}`,
-      'gamma'
-    );
-    return data.leaderboard || [];
+    const trades = await getRecentTrades(Math.min(2000, limit * 4)); // Get enough trades for aggregation
+    
+    const walletStats = new Map<string, {
+      address: string;
+      label?: string;
+      volume: number;
+      trades: number;
+      wins: number;
+      losses: number;
+    }>();
+    
+    for (const trade of trades) {
+      const wallet = trade.proxyWallet?.toLowerCase();
+      if (!wallet) continue;
+      
+      if (!walletStats.has(wallet)) {
+        walletStats.set(wallet, {
+          address: wallet,
+          label: trade.pseudonym || trade.name || undefined,
+          volume: 0,
+          trades: 0,
+          wins: 0,
+          losses: 0,
+        });
+      }
+      
+      const stats = walletStats.get(wallet)!;
+      stats.trades++;
+      stats.volume += trade.size * trade.price;
+      // We can't determine win/loss from individual trades without resolution data
+      // This is a simplified leaderboard based on volume and trade count
+    }
+    
+    // Convert to leaderboard entries, sorted by volume
+    const entries: LeaderboardEntry[] = Array.from(walletStats.values())
+      .sort((a, b) => b.volume - a.volume)
+      .slice(0, limit)
+      .map((stats, index) => ({
+        rank: index + 1,
+        address: stats.address,
+        label: stats.label,
+        pnl: 0, // Would need resolved trades to calculate
+        roi: 0,
+        volume: stats.volume,
+        trades: stats.trades,
+        winRate: 0,
+      }));
+    
+    return entries;
   } catch (error) {
-    console.warn('Polymarket leaderboard failed, trying Bullpen:', error);
-  }
-  
-  // Fallback to Bullpen
-  try {
-    const data = await fetchJson<LeaderboardResponse>(
-      `${BULLPEN_API}/leaderboard?limit=${limit}&period=${period}`,
-      'bullpen'
-    );
-    return data.leaderboard || [];
-  } catch (error) {
-    console.error('Both leaderboard endpoints failed:', error);
+    console.error('Failed to build leaderboard from trades:', error);
     throw new Error('Failed to fetch leaderboard from all sources');
   }
 }
@@ -155,15 +189,17 @@ export async function getActiveMarkets(limit = 500, category?: string): Promise<
   });
   if (category) params.set('category', category);
   
-  const data = await fetchJson<{ markets: PolymarketMarket[] }>(
+  // Gamma API returns array directly
+  const data = await fetchJson<PolymarketMarket[]>(
     `${GAMMA_API}/markets?${params}`,
     'gamma'
   );
   
-  return (data.markets || []).map(parseMarket);
+  return (data || []).map(parseMarket);
 }
 
 export async function getMarketBySlug(slug: string): Promise<ParsedMarket | null> {
+  // Gamma API returns array directly
   const data = await fetchJson<PolymarketMarket[]>(
     `${GAMMA_API}/markets?slug=${encodeURIComponent(slug)}`,
     'gamma'
@@ -174,6 +210,7 @@ export async function getMarketBySlug(slug: string): Promise<ParsedMarket | null
 }
 
 export async function getMarketByConditionId(conditionId: string): Promise<ParsedMarket | null> {
+  // Gamma API returns array directly
   const data = await fetchJson<PolymarketMarket[]>(
     `${GAMMA_API}/markets?conditionId=${encodeURIComponent(conditionId)}`,
     'gamma'
@@ -192,19 +229,21 @@ export async function getEventBySlug(slug: string): Promise<PolymarketEvent | nu
   return data[0] || null;
 }
 
-export async function getWalletTrades(address: string, limit = 200, cursor?: string): Promise<{ trades: WalletTrade[]; nextCursor?: string }> {
+export async function getWalletTrades(address: string, limit = 200, cursor?: string): Promise<{ trades: DataApiTrade[]; nextCursor?: string }> {
   const params = new URLSearchParams({
-    address,
+    address: address.toLowerCase(),
     limit: limit.toString(),
   });
   if (cursor) params.set('cursor', cursor);
   
-  const data = await fetchJson<WalletTradesResponse>(
-    `${GAMMA_API}/trades?${params}`,
-    'gamma'
+  // Use Data API for wallet trades - it supports address filtering
+  // Data API returns array directly
+  const trades = await fetchJson<DataApiTrade[]>(
+    `${DATA_API}/trades?${params}`,
+    'data'
   );
   
-  return { trades: data.trades || [], nextCursor: data.nextCursor };
+  return { trades: trades || [], nextCursor: undefined };
 }
 
 export async function getAllWalletTrades(address: string, lookbackDays = 30): Promise<ParsedWalletTrade[]> {
@@ -217,15 +256,15 @@ export async function getAllWalletTrades(address: string, lookbackDays = 30): Pr
     const trades = response.trades;
     
     for (const trade of trades) {
-      const tradeDate = new Date(trade.timestamp);
+      const tradeDate = new Date(parseInt(trade.timestamp) * 1000); // timestamp is in seconds as string
       if (tradeDate < cutoffDate) {
         return allTrades;
       }
       
       allTrades.push({
-        id: trade.id,
-        wallet: trade.wallet,
-        marketId: trade.market,
+        id: trade.transactionHash,
+        wallet: trade.proxyWallet,
+        marketId: trade.conditionId,
         conditionId: trade.conditionId,
         marketQuestion: trade.title || '',
         outcome: trade.outcome,
@@ -304,11 +343,12 @@ export async function getRecentTrades(limit = 10, market?: string): Promise<Data
   const params = new URLSearchParams({ limit: limit.toString() });
   if (market) params.set('market', market);
   
-  const data = await fetchJson<DataApiTradesResponse>(
+  // Data API returns array directly, not wrapped in object
+  const data = await fetchJson<DataApiTrade[]>(
     `${DATA_API}/trades?${params}`,
     'data'
   );
-  return data.trades || [];
+  return data || [];
 }
 
 export async function getOpenInterest(conditionId: string): Promise<number> {

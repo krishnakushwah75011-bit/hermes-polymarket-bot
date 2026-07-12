@@ -1,12 +1,33 @@
 // src/scripts/monitor-trades.ts
-// Trade monitor - detects new trades from tracked wallets and scores them
+// Trade monitor - detects new trades from tracked wallets and scores them (using pg pool)
 
 import { getAllWalletTrades, collectMarketSnapshot, getMarketBySlug, getMarketByConditionId } from '../lib/api/polymarket-client';
 import { scoreTrade, TradeScoringInput } from '../lib/scoring/trade-scorer';
 import { getActiveRuleSet } from '../lib/rules/rules-engine';
 import { createPaperTrade, calculateSimulatedPositionSize } from '../lib/engine/paper-engine';
-import { prisma } from '../lib/db/client';
+import { query } from '../lib/db/pool';
 import type { MarketSnapshot, ParsedWalletTrade } from '../lib/types';
+
+interface TrackedWallet {
+  address: string;
+  label?: string;
+  globalScore: number;
+  bestCategory?: string;
+  categoryStrengthsJson: string;
+  averageEntryTiming: number;
+  roi30d: number;
+  consistencyScore: number;
+  copyabilityScore: number;
+  oneHitWonderPenalty: number;
+  averageTradeSize: number;
+  tradeCount30d: number;
+  resolvedTradeCount30d: number;
+  winRate30d: number;
+  averageLiquidity: number;
+  averageSpread: number;
+  sourceRank?: number;
+  statusReason: string;
+}
 
 async function monitorTrades() {
   console.log('[monitor:trades] Starting trade monitoring...');
@@ -14,30 +35,11 @@ async function monitorTrades() {
   const rules = await getActiveRuleSet();
   
   // Get wallets with TRACK status
-  const trackedWallets = await prisma.walletProfile.findMany({
-    where: { status: 'TRACK' },
-    select: { 
-      address: true, 
-      label: true,
-      globalScore: true, 
-      bestCategory: true,
-      categoryStrengthsJson: true,
-      averageEntryTiming: true,
-      roi30d: true,
-      consistencyScore: true,
-      copyabilityScore: true,
-      oneHitWonderPenalty: true,
-      averageTradeSize: true,
-      tradeCount30d: true,
-      resolvedTradeCount30d: true,
-      winRate30d: true,
-      averageLiquidity: true,
-      averageSpread: true,
-      sourceRank: true,
-      statusReason: true,
-    },
-  });
+  const trackedWalletsResult = await query(`
+    SELECT * FROM "WalletProfile" WHERE status = 'TRACK'
+  `);
   
+  const trackedWallets: TrackedWallet[] = trackedWalletsResult.rows;
   console.log(`[monitor:trades] Monitoring ${trackedWallets.length} tracked wallets`);
   
   let newTradesDetected = 0;
@@ -53,15 +55,12 @@ async function monitorTrades() {
       
       for (const trade of trades) {
         // Check if already observed
-        const existing = await prisma.observedTrade.findFirst({
-          where: {
-            walletAddress: wallet.address,
-            conditionId: trade.conditionId,
-            transactionHash: trade.transactionHash,
-          },
-        });
+        const existing = await query(`
+          SELECT * FROM "ObservedTrade" 
+          WHERE "walletAddress" = $1 AND "conditionId" = $2 AND "transactionHash" = $3
+        `, [wallet.address, trade.conditionId, trade.transactionHash]);
         
-        if (existing) continue;
+        if (existing.rows.length > 0) continue;
         
         console.log(`[monitor:trades] New trade detected: ${wallet.address} -> ${trade.conditionId}`);
         newTradesDetected++;
@@ -94,24 +93,31 @@ async function monitorTrades() {
         }
         
         // Create observed trade record
-        const observedTrade = await prisma.observedTrade.create({
-          data: {
-            walletAddress: wallet.address,
-            marketId: trade.marketId,
-            conditionId: trade.conditionId,
-            marketQuestion: trade.marketQuestion,
-            marketCategory: trade.marketCategory || marketSnapshot.category,
-            outcome: trade.outcome,
-            side: trade.side,
-            walletEntryPrice: trade.price,
-            detectedPrice: trade.outcome.toLowerCase() === 'yes' 
-              ? (marketSnapshot.yesPrice || trade.price)
-              : (marketSnapshot.noPrice || trade.price),
-            size: trade.size,
-            timestamp: trade.timestamp,
-            rawTradeJson: JSON.stringify(trade),
-          },
-        });
+        const observedTradeResult = await query(`
+          INSERT INTO "ObservedTrade" (
+            "walletAddress", "marketId", "conditionId", "marketQuestion", 
+            "marketCategory", outcome, side, "walletEntryPrice", "detectedPrice", 
+            size, timestamp, "rawTradeJson"
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          RETURNING *
+        `, [
+          wallet.address,
+          trade.marketId,
+          trade.conditionId,
+          trade.marketQuestion,
+          trade.marketCategory || marketSnapshot.category,
+          trade.outcome,
+          trade.side,
+          trade.price,
+          trade.outcome.toLowerCase() === 'yes' 
+            ? (marketSnapshot.yesPrice || trade.price)
+            : (marketSnapshot.noPrice || trade.price),
+          trade.size,
+          trade.timestamp,
+          JSON.stringify(trade),
+        ]);
+        
+        const observedTrade = observedTradeResult.rows[0];
         
         // Score the trade
         const scoringInput: TradeScoringInput = {
@@ -133,7 +139,7 @@ async function monitorTrades() {
             winRate30d: wallet.winRate30d,
             averageLiquidity: wallet.averageLiquidity,
             averageSpread: wallet.averageSpread,
-            sourceRank: wallet.sourceRank || undefined,
+            sourceRank: wallet.sourceRank,
             statusReason: wallet.statusReason || '',
           },
           trade: trade,
@@ -144,28 +150,33 @@ async function monitorTrades() {
         const tradeScore = scoreTrade(scoringInput);
         
         // Create decision journal
-        await prisma.decisionJournal.create({
-          data: {
-            observedTradeId: observedTrade.id,
-            walletAddress: wallet.address,
-            marketId: trade.marketId,
-            decision: tradeScore.decision,
-            copyScore: tradeScore.total,
-            confidence: tradeScore.total,
-            reasonsJson: JSON.stringify(tradeScore.reasons),
-            risksJson: JSON.stringify(tradeScore.risks),
-            walletQualityScore: tradeScore.walletQuality,
-            roiScore: tradeScore.priceMovement, // placeholder
-            consistencyScore: tradeScore.liquidity, // placeholder
-            copyabilityScore: tradeScore.spread, // placeholder
-            categoryFitScore: tradeScore.categoryMatch,
-            entryTimingScore: tradeScore.timeToResolution,
-            spreadScore: tradeScore.spread,
-            liquidityScore: tradeScore.liquidity,
-            thesisScore: tradeScore.thesis,
-            simulatedPositionSize: calculateSimulatedPositionSize(tradeScore.total),
-          },
-        });
+        await query(`
+          INSERT INTO "DecisionJournal" (
+            "observedTradeId", "walletAddress", "marketId", decision, "copyScore",
+            confidence, "reasonsJson", "risksJson", "walletQualityScore", "roiScore",
+            "consistencyScore", "copyabilityScore", "categoryFitScore", "entryTimingScore",
+            "spreadScore", "liquidityScore", "thesisScore", "simulatedPositionSize"
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        `, [
+          observedTrade.id,
+          wallet.address,
+          trade.marketId,
+          tradeScore.decision,
+          tradeScore.total,
+          tradeScore.total,
+          JSON.stringify(tradeScore.reasons),
+          JSON.stringify(tradeScore.risks),
+          tradeScore.walletQuality,
+          tradeScore.priceMovement,
+          tradeScore.liquidity,
+          tradeScore.spread,
+          tradeScore.categoryMatch,
+          tradeScore.timeToResolution,
+          tradeScore.spread,
+          tradeScore.liquidity,
+          tradeScore.thesis,
+          calculateSimulatedPositionSize(tradeScore.total),
+        ]);
         
         scored++;
         
@@ -177,7 +188,9 @@ async function monitorTrades() {
             marketId: trade.marketId,
             outcome: trade.outcome,
             side: trade.side,
-            entryPrice: tradeScore.priceMovement > 0.5 ? marketSnapshot.yesPrice || trade.price : trade.price,
+            entryPrice: tradeScore.priceMovement > 0.5 
+              ? (marketSnapshot.yesPrice || trade.price) 
+              : trade.price,
             currentPrice: trade.outcome.toLowerCase() === 'yes' 
               ? (marketSnapshot.yesPrice || trade.price)
               : (marketSnapshot.noPrice || trade.price),

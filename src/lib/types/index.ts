@@ -57,6 +57,7 @@ export interface ParsedMarket {
   createdAt?: string;
   resolvedOutcome?: string;
   status?: 'ACTIVE' | 'RESOLVED' | 'CLOSED';
+  spread?: number;
 }
 
 export interface LeaderboardEntry {
@@ -162,6 +163,16 @@ export interface DataApiTrade {
   outcome: string;
   transactionHash: string;
   conditionId: string;
+  proxyWallet: string;
+  asset: string;
+  icon: string;
+  eventSlug: string;
+  outcomeIndex: number;
+  name: string;
+  pseudonym: string;
+  bio: string;
+  profileImage: string;
+  profileImageOptimized: string;
 }
 
 export interface DataApiTradesResponse {
@@ -322,4 +333,28 @@ export interface DailyReportData {
   worstWallets: Array<{ address: string; pnl: number }>;
   ruleChanges: string[];
   summary: string;
+}
+
+// Raw data for wallet scoring
+export interface WalletRawData {
+  address: string;
+  label?: string;
+  sourceRank?: number;
+  trades: ParsedWalletTrade[];
+  markets: Map<string, { category?: string; liquidity: number; spread: number; endDate?: string }>;
+}
+
+// Market metadata for scoring
+export interface MarketMetadata {
+  conditionId: string;
+  question: string;
+  slug: string;
+  category: string | null;
+  endDate: Date | null;
+  resolvedOutcome: string | null;
+  active: boolean;
+  closed: boolean;
+  volume: number | null;
+  liquidity: number | null;
+  spread: number | null;
 }

@@ -266,3 +266,76 @@ model DailyReport {
 
   @@index([date])
 }
+
+// Historical Trade - all trades collected continuously for building leaderboard/history
+model HistoricalTrade {
+  id              String   @id @default(cuid())
+  transactionHash String   @unique
+  proxyWallet     String
+  side            String   // "BUY" | "SELL"
+  asset           String   // token ID
+  conditionId     String
+  size            Float
+  price           Float
+  timestamp       DateTime
+  title           String
+  slug            String
+  icon            String?
+  eventSlug       String?
+  outcome         String
+  outcomeIndex    Int
+  name            String?
+  pseudonym       String?
+  bio             String?
+  profileImage    String?
+  profileImageOptimized String?
+  marketQuestion  String?
+  marketCategory  String?
+  marketEndDate   DateTime?
+  marketResolvedOutcome String?
+  collectedAt     DateTime @default(now())
+
+  @@index([proxyWallet])
+  @@index([conditionId])
+  @@index([timestamp])
+  @@index([collectedAt])
+}
+
+// Market Metadata - stores category, end date, resolved outcome for scoring
+model MarketMetadata {
+  id              String    @id @default(cuid())
+  conditionId     String    @unique
+  question        String
+  slug            String
+  category        String?
+  endDate         DateTime?
+  resolvedOutcome String?
+  active          Boolean
+  closed          Boolean
+  volume          Float?
+  liquidity       Float?
+  spread          Float?
+  outcomes        String    // JSON array
+  outcomePrices   String    // JSON array
+  clobTokenIds    String    // JSON array
+  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime  @default(now())
+
+  @@index([category])
+  @@index([endDate])
+  @@index([active])
+  @@index([closed])
+}
+
+// Data Collection State - tracks sync progress
+model DataCollectionState {
+  id              String   @id @default(cuid())
+  collectionType  String   @unique // "trades" | "markets"
+  lastCursor      String?
+  lastTimestamp   DateTime?
+  lastRunAt       DateTime
+  totalCollected  Int      @default(0)
+  status          String   @default("idle") // "idle" | "running" | "error"
+  errorMessage    String?
+  updatedAt       DateTime @updatedAt
+}

@@ -1,14 +1,5 @@
--- CreateEnum
-CREATE TYPE "WalletStatus" AS ENUM ('TRACK', 'WATCH', 'IGNORE');
-
--- CreateEnum
-CREATE TYPE "TradeDecision" AS ENUM ('PAPER_COPY', 'WATCHLIST', 'SKIP');
-
--- CreateEnum
-CREATE TYPE "PaperTradeStatus" AS ENUM ('OPEN', 'CLOSED', 'RESOLVED');
-
--- CreateEnum
-CREATE TYPE "OutcomeReviewOutcome" AS ENUM ('profitable', 'loss');
+-- Polymarket Copy Trading Bot - Tables Only (No Indexes/ FKs)
+-- Run this FIRST, then add indexes separately if needed
 
 -- CreateTable
 CREATE TABLE "LeaderboardScan" (
@@ -28,7 +19,7 @@ CREATE TABLE "WalletProfile" (
     "address" TEXT NOT NULL,
     "label" TEXT,
     "sourceRank" INTEGER,
-    "status" "WalletStatus" NOT NULL DEFAULT 'IGNORE',
+    "status" TEXT NOT NULL DEFAULT 'IGNORE',
     "roi30d" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "consistencyScore" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "copyabilityScore" DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -90,6 +81,7 @@ CREATE TABLE "MarketSnapshot" (
     "volume" DOUBLE PRECISION,
     "timeToResolution" DOUBLE PRECISION,
     "collectedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "rawMarketJson" TEXT NOT NULL,
 
     CONSTRAINT "MarketSnapshot_pkey" PRIMARY KEY ("id")
 );
@@ -100,7 +92,7 @@ CREATE TABLE "DecisionJournal" (
     "observedTradeId" TEXT NOT NULL,
     "walletAddress" TEXT NOT NULL,
     "marketId" TEXT NOT NULL,
-    "decision" "TradeDecision" NOT NULL,
+    "decision" TEXT NOT NULL,
     "copyScore" DOUBLE PRECISION NOT NULL,
     "confidence" DOUBLE PRECISION NOT NULL,
     "reasonsJson" TEXT NOT NULL,
@@ -133,12 +125,10 @@ CREATE TABLE "PaperTrade" (
     "simulatedPositionSize" DOUBLE PRECISION NOT NULL,
     "unrealizedPnl" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "realizedPnl" DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "status" "PaperTradeStatus" NOT NULL DEFAULT 'OPEN',
+    "status" TEXT NOT NULL DEFAULT 'OPEN',
     "openedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "closedAt" TIMESTAMP(3),
     "resolvedAt" TIMESTAMP(3),
-    "resolvedOutcome" TEXT,
-    "finalPnl" DOUBLE PRECISION,
 
     CONSTRAINT "PaperTrade_pkey" PRIMARY KEY ("id")
 );
@@ -161,14 +151,15 @@ CREATE TABLE "OutcomeReview" (
     "paperTradeId" TEXT NOT NULL,
     "walletAddress" TEXT NOT NULL,
     "marketId" TEXT NOT NULL,
+    "reviewTime" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "priceAfter1h" DOUBLE PRECISION,
     "priceAfter6h" DOUBLE PRECISION,
     "priceAfter24h" DOUBLE PRECISION,
-    "finalOutcome" TEXT NOT NULL,
+    "finalOutcome" TEXT,
     "simulatedPnl" DOUBLE PRECISION NOT NULL,
     "wasDecisionGood" BOOLEAN NOT NULL,
     "lessonsJson" TEXT NOT NULL,
-    "reviewTime" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "OutcomeReview_pkey" PRIMARY KEY ("id")
 );
@@ -210,14 +201,84 @@ CREATE TABLE "DailyReport" (
     "newSignals" INTEGER NOT NULL DEFAULT 0,
     "copiedSignals" INTEGER NOT NULL DEFAULT 0,
     "watchedSignals" INTEGER NOT NULL DEFAULT 0,
-    "bestWalletsJson" TEXT NOT NULL DEFAULT '[]',
-    "worstWalletsJson" TEXT NOT NULL DEFAULT '[]',
-    "ruleChangesJson" TEXT NOT NULL DEFAULT '[]',
-    "summary" TEXT,
+    "skippedSignals" INTEGER NOT NULL DEFAULT 0,
+    "bestWalletsJson" TEXT NOT NULL,
+    "worstWalletsJson" TEXT NOT NULL,
+    "ruleChangesJson" TEXT NOT NULL,
+    "summary" TEXT NOT NULL,
     "sentToTelegram" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "DailyReport_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "HistoricalTrade" (
+    "id" TEXT NOT NULL,
+    "transactionHash" TEXT NOT NULL,
+    "proxyWallet" TEXT NOT NULL,
+    "side" TEXT NOT NULL,
+    "asset" TEXT NOT NULL,
+    "conditionId" TEXT NOT NULL,
+    "size" DOUBLE PRECISION NOT NULL,
+    "price" DOUBLE PRECISION NOT NULL,
+    "timestamp" TIMESTAMP(3) NOT NULL,
+    "title" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
+    "icon" TEXT,
+    "eventSlug" TEXT,
+    "outcome" TEXT NOT NULL,
+    "outcomeIndex" INTEGER NOT NULL,
+    "name" TEXT,
+    "pseudonym" TEXT,
+    "bio" TEXT,
+    "profileImage" TEXT,
+    "profileImageOptimized" TEXT,
+    "marketQuestion" TEXT,
+    "marketCategory" TEXT,
+    "marketEndDate" TIMESTAMP(3),
+    "marketResolvedOutcome" TEXT,
+    "collectedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "HistoricalTrade_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "MarketMetadata" (
+    "id" TEXT NOT NULL,
+    "conditionId" TEXT NOT NULL,
+    "question" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
+    "category" TEXT,
+    "endDate" TIMESTAMP(3),
+    "resolvedOutcome" TEXT,
+    "active" BOOLEAN NOT NULL,
+    "closed" BOOLEAN NOT NULL,
+    "volume" DOUBLE PRECISION,
+    "liquidity" DOUBLE PRECISION,
+    "spread" DOUBLE PRECISION,
+    "outcomes" TEXT NOT NULL,
+    "outcomePrices" TEXT NOT NULL,
+    "clobTokenIds" TEXT NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "MarketMetadata_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "DataCollectionState" (
+    "id" TEXT NOT NULL,
+    "collectionType" TEXT NOT NULL,
+    "lastCursor" TEXT,
+    "lastTimestamp" TIMESTAMP(3),
+    "lastRunAt" TIMESTAMP(3) NOT NULL,
+    "totalCollected" INTEGER NOT NULL DEFAULT 0,
+    "status" TEXT NOT NULL DEFAULT 'idle',
+    "errorMessage" TEXT,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "DataCollectionState_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -254,7 +315,10 @@ CREATE INDEX "MarketSnapshot_marketId_idx" ON "MarketSnapshot"("marketId");
 CREATE INDEX "MarketSnapshot_conditionId_idx" ON "MarketSnapshot"("conditionId");
 
 -- CreateIndex
-CREATE INDEX "DecisionJournal_observedTradeId_idx" ON "DecisionJournal"("observedTradeId");
+CREATE INDEX "MarketSnapshot_collectedAt_idx" ON "MarketSnapshot"("collectedAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "DecisionJournal_observedTradeId_key" ON "DecisionJournal"("observedTradeId");
 
 -- CreateIndex
 CREATE INDEX "DecisionJournal_walletAddress_idx" ON "DecisionJournal"("walletAddress");
@@ -290,16 +354,19 @@ CREATE INDEX "PnlSnapshot_paperTradeId_idx" ON "PnlSnapshot"("paperTradeId");
 CREATE INDEX "PnlSnapshot_collectedAt_idx" ON "PnlSnapshot"("collectedAt");
 
 -- CreateIndex
-CREATE INDEX "OutcomeReview_decisionJournalId_idx" ON "OutcomeReview"("decisionJournalId");
+CREATE UNIQUE INDEX "OutcomeReview_decisionJournalId_key" ON "OutcomeReview"("decisionJournalId");
 
 -- CreateIndex
-CREATE INDEX "OutcomeReview_paperTradeId_idx" ON "OutcomeReview"("paperTradeId");
+CREATE UNIQUE INDEX "OutcomeReview_paperTradeId_key" ON "OutcomeReview"("paperTradeId");
 
 -- CreateIndex
 CREATE INDEX "OutcomeReview_walletAddress_idx" ON "OutcomeReview"("walletAddress");
 
 -- CreateIndex
 CREATE INDEX "OutcomeReview_marketId_idx" ON "OutcomeReview"("marketId");
+
+-- CreateIndex
+CREATE INDEX "OutcomeReview_reviewTime_idx" ON "OutcomeReview"("reviewTime");
 
 -- CreateIndex
 CREATE INDEX "OutcomeReview_wasDecisionGood_idx" ON "OutcomeReview"("wasDecisionGood");
@@ -311,13 +378,55 @@ CREATE UNIQUE INDEX "RuleSet_version_key" ON "RuleSet"("version");
 CREATE INDEX "RuleSet_active_idx" ON "RuleSet"("active");
 
 -- CreateIndex
+CREATE INDEX "RuleSet_version_idx" ON "RuleSet"("version");
+
+-- CreateIndex
 CREATE INDEX "RuleChange_oldRuleSetId_idx" ON "RuleChange"("oldRuleSetId");
 
 -- CreateIndex
 CREATE INDEX "RuleChange_newRuleSetId_idx" ON "RuleChange"("newRuleSetId");
 
 -- CreateIndex
+CREATE INDEX "RuleChange_createdAt_idx" ON "RuleChange"("createdAt");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "DailyReport_date_key" ON "DailyReport"("date");
+
+-- CreateIndex
+CREATE INDEX "DailyReport_date_idx" ON "DailyReport"("date");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "HistoricalTrade_transactionHash_key" ON "HistoricalTrade"("transactionHash");
+
+-- CreateIndex
+CREATE INDEX "HistoricalTrade_proxyWallet_idx" ON "HistoricalTrade"("proxyWallet");
+
+-- CreateIndex
+CREATE INDEX "HistoricalTrade_conditionId_idx" ON "HistoricalTrade"("conditionId");
+
+-- CreateIndex
+CREATE INDEX "HistoricalTrade_timestamp_idx" ON "HistoricalTrade"("timestamp");
+
+-- CreateIndex
+CREATE INDEX "HistoricalTrade_collectedAt_idx" ON "HistoricalTrade"("collectedAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MarketMetadata_conditionId_key" ON "MarketMetadata"("conditionId");
+
+-- CreateIndex
+CREATE INDEX "MarketMetadata_category_idx" ON "MarketMetadata"("category");
+
+-- CreateIndex
+CREATE INDEX "MarketMetadata_endDate_idx" ON "MarketMetadata"("endDate");
+
+-- CreateIndex
+CREATE INDEX "MarketMetadata_active_idx" ON "MarketMetadata"("active");
+
+-- CreateIndex
+CREATE INDEX "MarketMetadata_closed_idx" ON "MarketMetadata"("closed");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "DataCollectionState_collectionType_key" ON "DataCollectionState"("collectionType");
 
 -- AddForeignKey
 ALTER TABLE "ObservedTrade" ADD CONSTRAINT "ObservedTrade_walletAddress_fkey" FOREIGN KEY ("walletAddress") REFERENCES "WalletProfile"("address") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -351,3 +460,4 @@ ALTER TABLE "RuleChange" ADD CONSTRAINT "RuleChange_oldRuleSetId_fkey" FOREIGN K
 
 -- AddForeignKey
 ALTER TABLE "RuleChange" ADD CONSTRAINT "RuleChange_newRuleSetId_fkey" FOREIGN KEY ("newRuleSetId") REFERENCES "RuleSet"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
