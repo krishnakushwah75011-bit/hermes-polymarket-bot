@@ -511,3 +511,6 @@ export const db = {
 
 // Export as default for easy migration
 export default db;
+
+// Backward compatibility: scripts using import { prisma } will get the db object
+export const prisma = db;

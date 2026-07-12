@@ -12,16 +12,8 @@ async function scanWallets() {
   const lookbackDays = parseInt(process.env.SCAN_LOOKBACK_DAYS || '30', 10);
   
   // Get wallets to scan (all wallets from leaderboard scans)
+  // For first run, scan all wallets; subsequent runs would filter by status
   const wallets = await prisma.walletProfile.findMany({
-    where: {
-      // Only scan wallets that have been on leaderboard recently
-      // For first run, scan all; for subsequent runs, only TRACK/WATCH
-      OR: [
-        { status: 'TRACK' },
-        { status: 'WATCH' },
-        { status: 'IGNORE' },
-      ],
-    },
     orderBy: { sourceRank: 'asc' },
   });
   

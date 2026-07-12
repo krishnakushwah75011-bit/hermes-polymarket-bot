@@ -1,24 +1,37 @@
 // src/scripts/score-trades.ts
-// Trade scorer - scores pending observed trades and makes decisions
+// Trade scorer - scores pending observed trades and makes decisions (pg version)
 
 import { scoreTrade, TradeScoringInput } from '../lib/scoring/trade-scorer';
-import { getActiveRuleSet } from '../lib/rules/rules-engine';
-import { prisma } from '../lib/db/client';
-import { calculateSimulatedPositionSize } from '../lib/engine/paper-engine';
+import { query } from '../lib/db/pool';
+
+async function getActiveRules() {
+  const result = await query('SELECT * FROM "RuleSet" WHERE active = true ORDER BY version DESC LIMIT 1');
+  if (result.rows.length === 0) {
+    throw new Error('No active rule set found');
+  }
+  const rule = result.rows[0];
+  return {
+    id: rule.id,
+    version: rule.version,
+    active: rule.active,
+    rules: JSON.parse(rule.rulesJson),
+  };
+}
 
 async function scoreTrades() {
   console.log('[score:trades] Starting trade scoring...');
   
-  const rules = await getActiveRuleSet();
+  const rules = await getActiveRules();
   
   // Get unscored observed trades (no decision journal yet)
-  const unscoredTrades = await prisma.observedTrade.findMany({
-    where: {
-      decisions: { none: {} },
-    },
-    take: 100,
-    orderBy: { createdAt: 'desc' },
-  });
+  const unscoredResult = await query(`
+    SELECT ot.* FROM "ObservedTrade" ot
+    LEFT JOIN "DecisionJournal" dj ON ot.id = dj."observedTradeId"
+    WHERE dj.id IS NULL
+    ORDER BY ot."createdAt" DESC
+    LIMIT 100
+  `);
+  const unscoredTrades = unscoredResult.rows;
   
   console.log(`[score:trades] Found ${unscoredTrades.length} unscored trades`);
   
@@ -30,181 +43,196 @@ async function scoreTrades() {
   for (const trade of unscoredTrades) {
     try {
       // Get wallet profile
-      const wallet = await prisma.walletProfile.findUnique({
-        where: { address: trade.walletAddress },
-      });
+      const walletResult = await query(
+        'SELECT * FROM "WalletProfile" WHERE address = $1',
+        [trade.walletAddress.toLowerCase()]
+      );
+      const wallet = walletResult.rows[0] || null;
       
+      // Skip if wallet not tracked
       if (!wallet || wallet.status !== 'TRACK') {
-        // Skip if wallet not tracked
-        await prisma.decisionJournal.create({
-          data: {
-            observedTradeId: trade.id,
-            walletAddress: trade.walletAddress,
-            marketId: trade.marketId,
-            decision: 'SKIP',
-            copyScore: 0,
-            confidence: 0,
-            reasonsJson: JSON.stringify(['Wallet not tracked']),
-            risksJson: JSON.stringify([]),
-            walletQualityScore: wallet?.globalScore || 0,
-            roiScore: 0,
-            consistencyScore: 0,
-            copyabilityScore: 0,
-            categoryFitScore: 0,
-            entryTimingScore: 0,
-            spreadScore: 0,
-            liquidityScore: 0,
-            thesisScore: 0,
-            simulatedPositionSize: 0,
-          },
-        });
+        const decisionId = `dec_${trade.id}_${Date.now()}`;
+        await query(`
+          INSERT INTO "DecisionJournal" (
+            id, "observedTradeId", "walletAddress", "marketId",
+            decision, "copyScore", confidence, "reasonsJson", "risksJson",
+            "createdAt"
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+        `, [
+          decisionId, trade.id, trade.walletAddress, trade.marketId,
+          'SKIP', 0, 0,
+          JSON.stringify(['Wallet not tracked']),
+          JSON.stringify([])
+        ]);
+        
         skipped++;
+        console.log(`[score:trades] ${trade.id.substring(0, 10)}...: SKIP (wallet not tracked)`);
         continue;
       }
       
-      // Get market snapshot
-      const market = await prisma.marketSnapshot.findFirst({
-        where: { marketId: trade.marketId },
-        orderBy: { collectedAt: 'desc' },
-      });
+      // Get market snapshot for liquidity/spread data
+      const marketResult = await query(
+        `SELECT * FROM "MarketSnapshot" WHERE "conditionId" = $1 ORDER BY "collectedAt" DESC LIMIT 1`,
+        [trade.conditionId]
+      );
+      const market = marketResult.rows[0] || {
+        liquidity: 1000,
+        yesBid: trade.walletEntryPrice * 0.98,
+        yesAsk: trade.walletEntryPrice * 1.02,
+      };
       
-      if (!market) {
-        console.warn(`[score:trades] No market snapshot for ${trade.marketId}`);
-        continue;
-      }
-      
+      // Build scoring input
       const scoringInput: TradeScoringInput = {
+        trade: {
+          id: trade.id,
+          wallet: trade.walletAddress.toLowerCase(),
+          marketId: trade.marketId,
+          conditionId: trade.conditionId,
+          marketQuestion: trade.marketQuestion,
+          marketCategory: trade.marketCategory || undefined,
+          outcome: trade.outcome,
+          side: trade.side,
+          size: trade.size,
+          price: trade.walletEntryPrice,
+          walletEntryPrice: trade.walletEntryPrice,
+          timestamp: trade.timestamp,
+          transactionHash: trade.transactionHash || '',
+          title: trade.marketQuestion,
+        },
         wallet: {
           address: wallet.address,
           label: wallet.label || undefined,
-          globalScore: wallet.globalScore,
-          bestCategory: wallet.bestCategory || undefined,
-          categoryStrengths: JSON.parse(wallet.categoryStrengthsJson || '{}'),
-          averageEntryTiming: wallet.averageEntryTiming,
-          status: wallet.status,
+          sourceRank: wallet.sourceRank,
           roi30d: wallet.roi30d,
           consistencyScore: wallet.consistencyScore,
           copyabilityScore: wallet.copyabilityScore,
           oneHitWonderPenalty: wallet.oneHitWonderPenalty,
+          globalScore: wallet.globalScore,
+          bestCategory: wallet.bestCategory || undefined,
+          categoryStrengths: JSON.parse(wallet.categoryStrengthsJson || '{}'),
           averageTradeSize: wallet.averageTradeSize,
           tradeCount30d: wallet.tradeCount30d,
           resolvedTradeCount30d: wallet.resolvedTradeCount30d,
           winRate30d: wallet.winRate30d,
           averageLiquidity: wallet.averageLiquidity,
           averageSpread: wallet.averageSpread,
-          sourceRank: wallet.sourceRank || undefined,
+          averageEntryTiming: wallet.averageEntryTiming,
+          status: wallet.status as 'TRACK' | 'WATCH' | 'IGNORE',
           statusReason: wallet.statusReason || '',
         },
-        trade: {
-          id: trade.id,
-          wallet: trade.walletAddress,
+        market: {
           marketId: trade.marketId,
           conditionId: trade.conditionId,
-          marketQuestion: trade.marketQuestion,
-          marketCategory: trade.marketCategory || undefined,
-          outcome: trade.outcome,
-          side: trade.side as 'BUY' | 'SELL',
-          size: trade.size,
-          price: trade.walletEntryPrice,
-          walletEntryPrice: trade.walletEntryPrice,
-          timestamp: trade.timestamp,
-          transactionHash: trade.rawTradeJson ? JSON.parse(trade.rawTradeJson).transactionHash : '',
-        },
-        market: {
-          marketId: market.marketId,
-          conditionId: market.conditionId,
-          question: market.question,
+          question: trade.marketQuestion,
           category: market.category || undefined,
-          yesPrice: market.yesPrice || undefined,
-          noPrice: market.noPrice || undefined,
-          bestBid: market.bestBid || undefined,
-          bestAsk: market.bestAsk || undefined,
-          spread: market.spread || undefined,
-          liquidity: market.liquidity || undefined,
-          volume: market.volume || undefined,
-          timeToResolution: market.timeToResolution || undefined,
-          collectedAt: market.collectedAt,
+          yesPrice: market.yesBid || trade.walletEntryPrice,
+          noPrice: market.yesAsk || (1 - trade.walletEntryPrice),
+          bestBid: market.yesBid,
+          bestAsk: market.yesAsk,
+          spread: market.spread || 0.02,
+          liquidity: market.liquidity || 1000,
+          volume: market.volume24h,
+          timeToResolution: undefined,
+          collectedAt: new Date(),
         },
         rules: rules.rules,
       };
       
-      const tradeScore = scoreTrade(scoringInput);
-      const positionSize = calculateSimulatedPositionSize(tradeScore.total);
+      // Score the trade
+      const scoring = scoreTrade(scoringInput);
       
-      // Create decision journal
-      await prisma.decisionJournal.create({
-        data: {
-          observedTradeId: trade.id,
-          walletAddress: trade.walletAddress,
-          marketId: trade.marketId,
-          decision: tradeScore.decision,
-          copyScore: tradeScore.total,
-          confidence: tradeScore.total,
-          reasonsJson: JSON.stringify(tradeScore.reasons),
-          risksJson: JSON.stringify(tradeScore.risks),
-          walletQualityScore: tradeScore.walletQuality,
-          roiScore: tradeScore.priceMovement,
-          consistencyScore: tradeScore.liquidity,
-          copyabilityScore: tradeScore.spread,
-          categoryFitScore: tradeScore.categoryMatch,
-          entryTimingScore: tradeScore.timeToResolution,
-          spreadScore: tradeScore.spread,
-          liquidityScore: tradeScore.liquidity,
-          thesisScore: tradeScore.thesis,
-          simulatedPositionSize: positionSize,
-        },
-      });
+      // Make decision based on total score and rules
+      const thresholds = rules.rules;
+      let decision: 'COPY' | 'WATCH' | 'SKIP';
+      
+      if (scoring.total >= thresholds.minTradeScoreForCopy) {
+        decision = 'COPY';
+      } else if (scoring.total >= thresholds.minTradeScoreForWatch) {
+        decision = 'WATCH';
+      } else {
+        decision = 'SKIP';
+      }
+      
+      // Create decision journal entry
+      const decisionId = `dec_${trade.id}_${Date.now()}`;
+      await query(`
+        INSERT INTO "DecisionJournal" (
+          id, "observedTradeId", "walletAddress", "marketId",
+          decision, "copyScore", confidence, "reasonsJson", "risksJson",
+          "walletQualityScore", "roiScore", "consistencyScore", "copyabilityScore",
+          "categoryFitScore", "entryTimingScore", "spreadScore", "liquidityScore",
+          "thesisScore", "simulatedPositionSize", "createdAt"
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
+      `, [
+        decisionId, trade.id, trade.walletAddress, trade.marketId,
+        decision, scoring.total, scoring.total,
+        JSON.stringify(scoring.reasons),
+        JSON.stringify(scoring.risks),
+        scoring.walletQuality,
+        scoring.priceMovement, scoring.liquidity, scoring.spread,
+        scoring.categoryMatch, scoring.timeToResolution,
+        scoring.spread, scoring.liquidity,
+        scoring.thesis,
+        // Calculate simulated position size based on score
+        decision === 'COPY' ? 10 * scoring.total : 0
+      ]);
+      
+      // If COPY, create paper trade
+      if (decision === 'COPY') {
+        const positionSize = 10 * scoring.total; // $10 base * score
+        const paperTradeId = `pt_${trade.id}_${Date.now()}`;
+        await query(`
+          INSERT INTO "PaperTrade" (
+            id, "decisionJournalId", "walletAddress", "marketId",
+            outcome, side, "entryPrice", "currentPrice", "simulatedPositionSize",
+            "unrealizedPnl", "realizedPnl", status, "openedAt"
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+        `, [
+          paperTradeId, decisionId, trade.walletAddress, trade.marketId,
+          trade.outcome, trade.side, trade.walletEntryPrice, trade.walletEntryPrice,
+          positionSize,
+          0, 0, 'OPEN'
+        ]);
+        
+        paperCopied++;
+        console.log(`[score:trades] ${trade.id.substring(0, 10)}...: COPY ($${positionSize.toFixed(2)})`);
+      } else if (decision === 'WATCH') {
+        watchlisted++;
+        console.log(`[score:trades] ${trade.id.substring(0, 10)}...: WATCH (score: ${scoring.total.toFixed(2)})`);
+      } else {
+        skipped++;
+        console.log(`[score:trades] ${trade.id.substring(0, 10)}...: SKIP (score: ${scoring.total.toFixed(2)})`);
+      }
       
       scored++;
       
-      // Create paper trade if PAPER_COPY
-      if (tradeScore.decision === 'PAPER_COPY') {
-        const entryPrice = trade.outcome.toLowerCase() === 'yes' 
-          ? (market.yesPrice || trade.walletEntryPrice)
-          : (market.noPrice || trade.walletEntryPrice);
-        
-        await prisma.paperTrade.create({
-          data: {
-            decisionJournalId: trade.id, // This should be decisionJournal.id, need to fix
-            walletAddress: trade.walletAddress,
-            marketId: trade.marketId,
-            outcome: trade.outcome,
-            side: trade.side,
-            entryPrice,
-            currentPrice: entryPrice,
-            simulatedPositionSize: positionSize,
-            unrealizedPnl: 0,
-            realizedPnl: 0,
-            status: 'OPEN',
-          },
-        });
-        paperCopied++;
-      } else if (tradeScore.decision === 'WATCHLIST') {
-        watchlisted++;
-      } else {
-        skipped++;
-      }
-      
-    } catch (error) {
-      console.error(`[score:trades] Error scoring trade ${trade.id}:`, error);
+    } catch (error: any) {
+      console.error(`[score:trades] Error scoring ${trade.id}:`, error.message);
+      if (error.stack) console.error(error.stack);
     }
   }
   
   console.log(`[score:trades] Completed: ${scored} scored, ${paperCopied} paper copied, ${watchlisted} watchlisted, ${skipped} skipped`);
   
-  return { success: true, scored, paperCopied, watchlisted, skipped };
+  return {
+    success: true,
+    scored,
+    paperCopied,
+    watchlisted,
+    skipped,
+  };
 }
 
+// Run if executed directly
 if (require.main === module) {
-  scoreTrades()
-    .then(result => {
-      console.log('[score:trades] Completed:', result);
-      process.exit(0);
-    })
-    .catch(error => {
-      console.error('[score:trades] Failed:', error);
-      process.exit(1);
-    });
+  scoreTrades().then(result => {
+    console.log('[score:trades] Completed:', result);
+    process.exit(result.success ? 0 : 1);
+  }).catch(error => {
+    console.error('[score:trades] CRASHED:', error.message);
+    if (error.stack) console.error(error.stack);
+    process.exit(1);
+  });
 }
 
 export { scoreTrades };

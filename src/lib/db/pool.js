@@ -4,85 +4,79 @@
 //
 // CRITICAL: Scripts using this file MUST set: --dns-result-order=ipv4first
 // This forces Node.js to resolve Supabase hostnames to IPv4 (Airtel Fiber blocks IPv6)
-
-import { Pool, PoolClient, QueryResult } from 'pg';
-
+import { Pool } from 'pg';
 // Supabase connection configuration
 // Note: Using separate params instead of connectionString to avoid options= parsing issues
 const supabaseConfig = {
-  host: process.env.SUPABASE_HOST || 'db.iaxfwsjjmwvlqyqvzvfb.supabase.co',
-  port: parseInt(process.env.SUPABASE_PORT || '5432'),
-  database: process.env.SUPABASE_DB || 'postgres',
-  user: process.env.SUPABASE_USER || 'postgres',
-  password: process.env.SUPABASE_PASSWORD || 'kamalkrishna@12345',
-  ssl: {
-    rejectUnauthorized: false, // Accept Supabase's self-signed certs
-  },
+    host: process.env.SUPABASE_HOST || 'db.iaxfwsjjmwvlqyqvzvfb.supabase.co',
+    port: parseInt(process.env.SUPABASE_PORT || '5432'),
+    database: process.env.SUPABASE_DB || 'postgres',
+    user: process.env.SUPABASE_USER || 'postgres',
+    password: process.env.SUPABASE_PASSWORD || 'kamalkrishna@12345',
+    ssl: {
+        rejectUnauthorized: false, // Accept Supabase's self-signed certs
+    },
 };
-
 // Session pooler for runtime queries
 export const pool = new Pool({
-  ...supabaseConfig,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
+    ...supabaseConfig,
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
 });
-
 // Direct connection for migrations/admin (same as pooler for now)
 export const directPool = new Pool({
-  ...supabaseConfig,
-  max: 5,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 15000,
+    ...supabaseConfig,
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 15000,
 });
-
 pool.on('error', (err) => {
-  console.error('Unexpected pooler pool error', err);
+    console.error('Unexpected pooler pool error', err);
 });
-
 directPool.on('error', (err) => {
-  console.error('Unexpected direct pool error', err);
+    console.error('Unexpected direct pool error', err);
 });
-
 // Helper to run queries with pooler (runtime queries)
-export async function query<T extends import('pg').QueryResultRow = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
-  const client = await pool.connect();
-  try {
-    return await client.query<T>(text, params);
-  } finally {
-    client.release();
-  }
+export async function query(text, params) {
+    const client = await pool.connect();
+    try {
+        return await client.query(text, params);
+    }
+    finally {
+        client.release();
+    }
 }
-
 // Helper to run queries with direct connection (admin/migrations)
-export async function queryDirect<T extends import('pg').QueryResultRow = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
-  const client = await directPool.connect();
-  try {
-    return await client.query<T>(text, params);
-  } finally {
-    client.release();
-  }
+export async function queryDirect(text, params) {
+    const client = await directPool.connect();
+    try {
+        return await client.query(text, params);
+    }
+    finally {
+        client.release();
+    }
 }
-
 // Transaction helper
-export async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await fn(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+export async function transaction(fn) {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const result = await fn(client);
+        await client.query('COMMIT');
+        return result;
+    }
+    catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    }
+    finally {
+        client.release();
+    }
 }
-
 // Initialize database (create tables if not exist)
 export async function initializeDatabase() {
-  await queryDirect(`
+    await queryDirect(`
     CREATE TABLE IF NOT EXISTS "scoring_rules" (
       id SERIAL PRIMARY KEY,
       version INTEGER NOT NULL DEFAULT 1,
@@ -105,9 +99,8 @@ export async function initializeDatabase() {
     )
   `);
 }
-
 // Close all pools gracefully
 export async function closePools() {
-  await pool.end();
-  await directPool.end();
+    await pool.end();
+    await directPool.end();
 }
