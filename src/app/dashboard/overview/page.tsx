@@ -1,47 +1,67 @@
 // app/dashboard/overview/page.tsx - Stub version for Vercel deployment
-import { PrismaClient } from '@prisma/client';
+import { query } from '@/lib/db/client';
 
 export const dynamic = 'force-dynamic';
 
-const prisma = new PrismaClient();
-
-// Inline PnLChart component to avoid import issues
-function PnLChart({ data }: { data: { date: string; pnl: number }[] }) {
-  if (data.length === 0) return <div className="h-48 flex items-center justify-center text-gray-400">No data</div>;
-  return (
-    <div className="h-48 flex items-end justify-between gap-1">
-      {data.map((d, i) => {
-        const height = Math.max(10, Math.min(90, 50 + d.pnl));
-        return (
-          <div key={i} className="flex-1 flex flex-col items-center gap-1">
-            <div className={`w-full rounded-t ${d.pnl >= 0 ? 'bg-green-500' : 'bg-red-500'}`} style={{ height: `${height}%` }} title={`${d.date}: $${d.pnl.toFixed(2)}`} />
-            <span className="text-xs text-gray-500">{d.date}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 async function getDashboardData() {
-  const allTrades = await prisma.paperTrade.findMany({ include: { decisionJournal: true } });
-  const openTrades = allTrades.filter(t => t.status === 'OPEN');
-  const closedTrades = allTrades.filter(t => t.status === 'CLOSED' || t.status === 'RESOLVED');
-  const winningTrades = closedTrades.filter(t => t.realizedPnl > 0);
-  
-  return {
-    totalPnl: openTrades.reduce((sum, t) => sum + t.unrealizedPnl, 0) + closedTrades.reduce((sum, t) => sum + t.realizedPnl, 0),
-    totalUnrealizedPnl: openTrades.reduce((sum, t) => sum + t.unrealizedPnl, 0),
-    totalRealizedPnl: closedTrades.reduce((sum, t) => sum + t.realizedPnl, 0),
-    winRate: closedTrades.length > 0 ? winningTrades.length / closedTrades.length : 0,
-    openPositions: openTrades.length,
-    totalTrades: allTrades.length,
-    trackedWallets: await prisma.walletProfile.count({ where: { status: 'TRACK' } }),
-    watchWallets: await prisma.walletProfile.count({ where: { status: 'WATCH' } }),
-    copiedToday: 0,
-    watchedToday: 0,
-    openTrades: openTrades.slice(0, 5),
-  };
+  try {
+    // Paper trades summary
+    const allTradesResult = await query('SELECT * FROM "PaperTrade"');
+    const allTrades = allTradesResult.rows;
+    
+    const openTrades = allTrades.filter((t: any) => t.status === 'OPEN');
+    const closedTrades = allTrades.filter((t: any) => t.status === 'CLOSED' || t.status === 'RESOLVED');
+    const winningTrades = closedTrades.filter((t: any) => t.realized_pnl > 0);
+    
+    const totalUnrealizedPnl = openTrades.reduce((sum: number, t: any) => sum + (t.unrealized_pnl || 0), 0);
+    const totalRealizedPnl = closedTrades.reduce((sum: number, t: any) => sum + (t.realized_pnl || 0), 0);
+    const totalPnl = totalUnrealizedPnl + totalRealizedPnl;
+    const winRate = closedTrades.length > 0 ? winningTrades.length / closedTrades.length : 0;
+    
+    // Wallet counts
+    const trackedResult = await query('SELECT COUNT(*) FROM "WalletProfile" WHERE status = $1', ['TRACK']);
+    const watchResult = await query('SELECT COUNT(*) FROM "WalletProfile" WHERE status = $1', ['WATCH']);
+    const trackedWallets = parseInt(trackedResult.rows[0]?.count || '0');
+    const watchWallets = parseInt(watchResult.rows[0]?.count || '0');
+    
+    return {
+      totalPnl,
+      totalUnrealizedPnl,
+      totalRealizedPnl,
+      winRate,
+      openPositions: openTrades.length,
+      totalTrades: allTrades.length,
+      trackedWallets,
+      watchWallets,
+      copiedToday: 0,
+      watchedToday: 0,
+      openTrades: openTrades.slice(0, 5).map((t: any) => ({
+        id: t.id,
+        marketId: t.market_id,
+        outcome: t.outcome,
+        side: t.side,
+        entryPrice: t.entry_price,
+        currentPrice: t.current_price,
+        unrealizedPnl: t.unrealized_pnl,
+      })),
+    };
+  } catch (error) {
+    console.error('[Dashboard] Error fetching data:', error);
+    // Return empty state on error
+    return {
+      totalPnl: 0,
+      totalUnrealizedPnl: 0,
+      totalRealizedPnl: 0,
+      winRate: 0,
+      openPositions: 0,
+      totalTrades: 0,
+      trackedWallets: 0,
+      watchWallets: 0,
+      copiedToday: 0,
+      watchedToday: 0,
+      openTrades: [],
+    };
+  }
 }
 
 function MetricCard({ title, value, subtext, color }: { title: string; value: string; subtext: string; color: string }) {
