@@ -1,7 +1,9 @@
 // lib/db/client.ts
 // PostgreSQL database client using node-pg (replaces Prisma)
 
-export { pool, directPool, query, queryDirect, transaction, initializeDatabase, closePools } from './pool';
+import { pool, directPool, query, queryDirect, transaction, initializeDatabase, closePools } from './pool';
+
+export { pool, directPool, query, queryDirect, transaction, initializeDatabase, closePools };
 
 // Re-export types for compatibility
 export type { PoolClient } from 'pg';
@@ -44,7 +46,7 @@ export const db = {
       
       if (options.orderBy) {
         const [field, direction] = Object.entries(options.orderBy)[0];
-        sql += ` ORDER BY "${field}" ${direction.toUpperCase()}`;
+        sql += ` ORDER BY "${field}" ${(direction as string).toUpperCase()}`;
       }
       
       if (options.take) {
@@ -194,7 +196,7 @@ export const db = {
       
       if (options.orderBy) {
         const [field, direction] = Object.entries(options.orderBy)[0];
-        sql += ` ORDER BY "${field}" ${direction.toUpperCase()}`;
+        sql += ` ORDER BY "${field}" ${(direction as string).toUpperCase()}`;
       }
       
       if (options.take) {
@@ -409,7 +411,7 @@ export const db = {
       
       if (options.orderBy) {
         const [field, direction] = Object.entries(options.orderBy)[0];
-        sql += ` ORDER BY "${field}" ${direction.toUpperCase()}`;
+        sql += ` ORDER BY "${field}" ${(direction as string).toUpperCase()}`;
       }
       
       const result = await query(sql, params);

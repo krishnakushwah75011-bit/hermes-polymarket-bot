@@ -45,7 +45,7 @@ directPool.on('error', (err) => {
 });
 
 // Helper to run queries with pooler (runtime queries)
-export async function query<T = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
+export async function query<T extends import('pg').QueryResultRow = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
   const client = await pool.connect();
   try {
     return await client.query<T>(text, params);
@@ -55,7 +55,7 @@ export async function query<T = any>(text: string, params?: any[]): Promise<Quer
 }
 
 // Helper to run queries with direct connection (admin/migrations)
-export async function queryDirect<T = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
+export async function queryDirect<T extends import('pg').QueryResultRow = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
   const client = await directPool.connect();
   try {
     return await client.query<T>(text, params);

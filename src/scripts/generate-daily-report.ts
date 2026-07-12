@@ -1,7 +1,7 @@
 // src/scripts/generate-daily-report.ts
 // Daily report generator with Telegram integration
 
-import { prisma } from '@/lib/db/client';
+import { query } from '@/lib/db/client';
 import { sendTelegramMessage } from '@/lib/telegram/bot';
 
 async function generateDailyReport() {

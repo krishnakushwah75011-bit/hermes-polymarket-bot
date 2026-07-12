@@ -92,7 +92,7 @@ async function collectTrades() {
           }
         } catch (e) {
           // Ignore duplicate key errors
-          if (!(e as any).code === '23505') {
+          if ((e as any).code !== '23505') {
             console.error(`[collect:trades] Error storing trade:`, e);
           }
         }
