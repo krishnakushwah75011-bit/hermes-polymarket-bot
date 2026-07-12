@@ -4,6 +4,7 @@
 import { PrismaClient } from '@prisma/client';
 import { format } from 'date-fns';
 import Link from 'next/link';
+import PnLChart from '../../components/pnl-chart-simple';
 
 export const dynamic = 'force-dynamic';
 
@@ -88,49 +89,6 @@ function MetricCard({ title, value, subtext, color }: { title: string; value: st
       <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{title}</p>
       <p className="text-3xl font-bold mt-1">{value}</p>
       <p className="text-sm text-gray-500 mt-1">{subtext}</p>
-    </div>
-  );
-}
-
-function PnLChart({ data }: { data: { date: string; pnl: number }[] }) {
-  if (data.length === 0) return <div className="h-48 flex items-center justify-center text-gray-400">No data</div>;
-
-  const maxPnl = Math.max(...data.map(d => d.pnl), 0);
-  const minPnl = Math.min(...data.map(d => d.pnl), 0);
-  const range = maxPnl - minPnl || 1;
-
-  return (
-    <div className="h-48 relative">
-      <svg className="w-full h-full" viewBox="0 0 600 200" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <rect x="0" y="0" width="600" height="200" fill="#f9fafb" />
-        <line x1="0" y1="100" x2="600" y2="100" stroke="#e5e7eb" strokeWidth="1" />
-        {data.length > 1 && (() => {
-                  const points = data.map((d, i) => `${i * (600 / (data.length - 1))},${100 - (d.pnl - minPnl) / range * 180}`).join(' ');
-                  const firstY = 100 - (data[0].pnl - minPnl) / range * 180;
-                  const lastX = (data.length - 1) * (600 / (data.length - 1));
-          
-                  return (
-                    <>
-                      <path
-                        d={`M0,${firstY} L${points} L${lastX},200 L0,200 Z`}
-                        fill="url(#areaGradient)"
-                      />
-                      <path
-                        d={`M0,${firstY} L${points}`}
-                        stroke="#10b981"
-                        strokeWidth="2"
-                        fill="none"
-                      />
-                    </>
-                  );
-                })()}
-      </svg>
     </div>
   );
 }
