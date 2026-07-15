@@ -36,14 +36,30 @@ console.log('');
 
 // Import and execute the target script
 import(scriptPath).then((module) => {
-  const main = module.main || module.default;
+  // Try different export patterns
+  const main = module.main;
+  const defaultExport = module.default;
+  const namedExport = Object.keys(module).find(k => k.toLowerCase().includes('main') || k.toLowerCase() === module.defaultScriptName?.toLowerCase());
+  
   if (main && typeof main === 'function') {
     main().catch((error: Error) => {
       console.error('[run-cron] Script failed:', error.message);
       process.exit(1);
     });
+  } else if (defaultExport && typeof defaultExport === 'function') {
+    defaultExport().catch((error: Error) => {
+      console.error('[run-cron] Script failed:', error.message);
+      process.exit(1);
+    });
+  } else if (module.scoreTrades && typeof module.scoreTrades === 'function') {
+    // Special case for score-trades.ts
+    module.scoreTrades().catch((error: Error) => {
+      console.error('[run-cron] Script failed:', error.message);
+      process.exit(1);
+    });
   } else {
     console.error('[run-cron] No main() function found in', scriptPath);
+    console.error('[run-cron] Available exports:', Object.keys(module).filter(k => typeof module[k] === 'function'));
     process.exit(1);
   }
 }).catch((error: Error) => {

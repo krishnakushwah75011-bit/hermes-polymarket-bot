@@ -154,9 +154,9 @@ async function collectMarkets() {
         await query(`
           INSERT INTO "MarketMetadata" (
             id, "conditionId", question, slug, category, "endDate", "resolvedOutcome",
-            active, closed, volume, liquidity, spread, outcomes, "outcomePrices", "clobTokenIds"
+            active, closed, volume, liquidity, spread, outcomes, "outcomePrices", "clobTokenIds", "updatedAt"
           ) VALUES (
-            gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+            gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW()
           )
           ON CONFLICT ("conditionId") DO UPDATE SET
             category = EXCLUDED.category,
@@ -169,7 +169,8 @@ async function collectMarkets() {
             spread = EXCLUDED.spread,
             outcomes = EXCLUDED.outcomes,
             "outcomePrices" = EXCLUDED."outcomePrices",
-            "clobTokenIds" = EXCLUDED."clobTokenIds"
+            "clobTokenIds" = EXCLUDED."clobTokenIds",
+            "updatedAt" = NOW()
         `, [
           market.conditionId,
           market.question,

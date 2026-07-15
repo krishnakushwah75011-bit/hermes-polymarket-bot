@@ -82,15 +82,15 @@ async function generateDailyReport() {
       INSERT INTO "DailyReport" (
         id, date, "paperPnl", "winRate", "openPositions",
         "newSignals", "copiedSignals", "watchedSignals", "skippedSignals",
-        "bestWalletsJson", "worstWalletsJson", summary, "sentToTelegram"
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        "bestWalletsJson", "worstWalletsJson", "ruleChangesJson", summary, "sentToTelegram"
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       ON CONFLICT (id) DO UPDATE SET
         "paperPnl" = $3, "winRate" = $4, "openPositions" = $5,
         "sentToTelegram" = TRUE, "updatedAt" = NOW()
     `, [
       reportId, today, totalPnL, parseFloat(winRate), openPositions,
       0, 0, 0, 0,
-      '[]', '[]', 
+      '[]', '[]', '[]',
       `Collected ${tradesCollected} trades, ${walletsTracked} wallets tracked. P&L: $${totalPnL.toFixed(2)}, Win Rate: ${winRate}%`,
       true
     ]);

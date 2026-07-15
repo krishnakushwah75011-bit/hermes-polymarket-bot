@@ -95,10 +95,10 @@ async function monitorTrades() {
         // Create observed trade record
         const observedTradeResult = await query(`
           INSERT INTO "ObservedTrade" (
-            "walletAddress", "marketId", "conditionId", "marketQuestion", 
+            id, "walletAddress", "marketId", "conditionId", "marketQuestion", 
             "marketCategory", outcome, side, "walletEntryPrice", "detectedPrice", 
             size, timestamp, "rawTradeJson"
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           RETURNING *
         `, [
           wallet.address,
@@ -152,11 +152,11 @@ async function monitorTrades() {
         // Create decision journal
         await query(`
           INSERT INTO "DecisionJournal" (
-            "observedTradeId", "walletAddress", "marketId", decision, "copyScore",
+            id, "observedTradeId", "walletAddress", "marketId", decision, "copyScore",
             confidence, "reasonsJson", "risksJson", "walletQualityScore", "roiScore",
             "consistencyScore", "copyabilityScore", "categoryFitScore", "entryTimingScore",
             "spreadScore", "liquidityScore", "thesisScore", "simulatedPositionSize"
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         `, [
           observedTrade.id,
           wallet.address,
